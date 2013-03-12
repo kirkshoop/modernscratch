@@ -21,6 +21,7 @@
 #include <tuple>
 #include <string>
 #include <vector>
+#include <list>
 
 #include "cpprx/rx.hpp"
 namespace rx=rxcpp;
@@ -76,6 +77,12 @@ l::wnd::dispatch_result dispatch(
 
 }
 
+bool operator==(POINT lhs, POINT rhs)
+{
+    return lhs.x == rhs.x && lhs.y == rhs.y;
+}
+bool operator!=(POINT lhs, POINT rhs) {return !(lhs == rhs);}
+
 namespace RootWindow
 {
     // tie the ADL methods together
@@ -88,27 +95,9 @@ namespace RootWindow
     // note: no base class
 	struct window
 	{
-        explicit window(CREATESTRUCT&)
+        explicit window(HWND handle, CREATESTRUCT& cs)
 		{
             messages = rx::CreateSubject<rxmsg::message>();
-
-            // pass onsize to child if there is one
-            rx::from(messages)
-                .where([this](const rxmsg::message& m){
-                    return !handled(m) && m.id == WM_SIZE && this->child;})
-                .select([](const rxmsg::message& m) {
-                    SIZE s = {GET_X_LPARAM(m.lParam), GET_Y_LPARAM(m.lParam)}; return std::make_pair(s, m.out);})
-                .subscribe([this](const std::pair<SIZE, l::wnd::dispatch_result*>& s){
-                    rxmsg::set_handled(s.second);
-                    rxmsg::set_lResult(
-                        s.second, 
-                        SetWindowPos(
-					        this->child.get(), NULL, 
-					        0, 0, s.first.cx, s.first.cy,
-					        SWP_NOZORDER | SWP_NOACTIVATE
-                        )
-                    );
-                });
 
             // post quit message
             rx::from(messages)
@@ -116,6 +105,7 @@ namespace RootWindow
                     return !handled(m) && m.id == WM_NCDESTROY;})
                 .subscribe([this](const rxmsg::message& m){
                     set_handled(m);
+                    cd.Dispose();
     	    		PostQuitMessage(0);
                 });
 
@@ -150,6 +140,67 @@ namespace RootWindow
                         this->PaintContent(ps)
                     );
                 });
+
+            // note: distinct_until_changed is necessary; while 
+            //  Winforms filters duplicate mouse moves, 
+            //  user32 doesn't filter this for you: http://blogs.msdn.com/b/oldnewthing/archive/2003/10/01/55108.aspx
+
+            auto mouseMove = rx::from(messages)
+                .where([this](const rxmsg::message& m){
+                    return !handled(m) && m.id == WM_MOUSEMOVE;})
+                .select([](const rxmsg::message& m) {
+                    POINT p = {GET_X_LPARAM(m.lParam), GET_Y_LPARAM(m.lParam)}; return p;})
+                .distinct_until_changed()
+                .publish();
+
+            // set up labels and query
+            auto msg = L"Time flies like an arrow";
+
+            auto mainFormScheduler = std::make_shared<rx::win32::WindowScheduler>();
+            auto worker = std::make_shared<rx::EventLoopScheduler>();
+
+            for (int i = 0; msg[i]; ++i)
+            {
+                auto label = CreateLabelFromLetter(msg[i], cs.hInstance, handle);
+
+                auto s = rx::from(mouseMove)
+                    .delay(std::chrono::milliseconds(i * 100 + 1),  worker)
+                    .observe_on(mainFormScheduler)
+                    .subscribe([=](const POINT& p)
+                    {
+                        SetWindowPos(label, nullptr, p.x+20*i, p.y-20, 20, 30, SWP_NOOWNERZORDER);
+                        InvalidateRect(label, nullptr, true);
+                        UpdateWindow(label);
+                    });
+
+                cd.Add(std::move(s));
+            }
+        }
+
+        inline HWND CreateLabelFromLetter(wchar_t c, HINSTANCE hinst, HWND parent)
+        {
+	        unique_winerror winerror;
+            std::pair<std::wstring, l::wr::unique_close_window> label;
+
+            label.first.append(&c, &c+1);
+	        std::tie(winerror, label.second) = 
+		        l::wr::winerror_and_close_window(
+			        CreateWindow(
+				        L"Static", label.first.c_str(), 
+				        WS_CHILD | WS_VISIBLE,
+				        0, 0, 20, 30, 
+				        parent, NULL, 
+				        hinst, 
+				        NULL));
+
+	        if (!winerror || !label.second)
+	        {
+                winerror.throw_if();
+	        }
+
+            auto result = label.second.get();
+            labels.push_back(std::move(label));
+            return result;
         }
 
 		LRESULT PaintContent(PAINTSTRUCT& )
@@ -158,7 +209,8 @@ namespace RootWindow
 		}
 
         rxmsg::message::Subject messages;
-		l::wr::unique_close_window child;
+        rx::ComposableDisposable cd;
+		std::list<std::pair<std::wstring, l::wr::unique_close_window>> labels;
 	};
 }
 
