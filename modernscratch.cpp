@@ -22,11 +22,47 @@
 #include <string>
 #include <vector>
 
+#include "cpprx/rx.hpp"
+namespace rx=rxcpp;
+
 #define UNIQUE_WINERROR_DEFINE_REPORTS
 #define UNIQUE_HRESULT_DEFINE_REPORTS
 #define LIBRARIES_NAMESPACE mylib
 #include "..\libraries\libraries.h"
 namespace l=LIBRARIES_NAMESPACE;
+
+struct RxWindowMessage 
+{
+    typedef std::shared_ptr<rx::Subject<RxWindowMessage>> Subject;
+
+    HWND window;
+    UINT message;
+    WPARAM wParam;
+    LPARAM lParam;
+    std::pair<bool, LRESULT>* out;
+};
+
+template<typename T> 
+std::pair<bool, LRESULT> dispatch_rx_window_message(
+    const l::wnd::Context<T>& c, 
+    const std::shared_ptr<rx::Subject<RxWindowMessage>>& subject)
+{
+    std::pair<bool, LRESULT> result(false,0L);
+    RxWindowMessage rxmsg;
+
+    rxmsg.window = c.window;
+    rxmsg.lParam = c.lParam;
+    rxmsg.wParam = c.wParam;
+    rxmsg.message = c.message;
+    rxmsg.out = &result;
+
+    subject->OnNext(rxmsg);
+    if (rxmsg.message == WM_NCDESTROY) 
+    {
+        subject->OnCompleted();
+    }
+    return result;
+}
 
 namespace RootWindow
 {
@@ -38,79 +74,96 @@ namespace RootWindow
 
 	struct window
 	{
-		explicit window(CREATESTRUCT&)
+        RxWindowMessage::Subject messages;
+
+        explicit window(CREATESTRUCT&)
 		{
-		}
+            messages = rx::CreateSubject<RxWindowMessage>();
+
+            // pass onsize to child if there is one
+            rx::from(messages)
+                .where([this](const RxWindowMessage& m){return m.message == WM_SIZE && this->child;})
+                .select([](const RxWindowMessage& m) {SIZE s = {GET_X_LPARAM(m.lParam), GET_Y_LPARAM(m.lParam)}; return std::make_pair(s, m.out);})
+                .subscribe([this](const std::pair<SIZE, std::pair<bool, LRESULT>*>& s){
+                    s.second->first = true;
+                    s.second->second = SetWindowPos(
+					this->child.get(), NULL, 
+					0, 0, s.first.cx, s.first.cy,
+					SWP_NOZORDER | SWP_NOACTIVATE);
+            });
+
+            // post quit message
+            rx::from(messages)
+                .where([this](const RxWindowMessage& m){return m.message == WM_NCDESTROY;})
+                .subscribe([this](const RxWindowMessage& m){
+                    m.out->first = true;
+    	    		PostQuitMessage(0);
+                });
+
+            // print client
+            rx::from(messages)
+                .where([this](const RxWindowMessage& m){return m.message == WM_PRINTCLIENT;})
+                .select([](const RxWindowMessage& m) {return std::make_tuple(m.window, reinterpret_cast<HDC>(m.wParam), m.out);})
+                .subscribe([this](const std::tuple<HWND, HDC, std::pair<bool, LRESULT>*>& m){
+                    std::get<2>(m)->first = true;
+			        PAINTSTRUCT ps = {};
+			        ps.hdc = std::get<1>(m);
+			        GetClientRect(std::get<0>(m), &ps.rcPaint);
+			        std::get<2>(m)->second = this->PaintContent(ps);
+                });
+
+            rx::from(messages)
+                .where([this](const RxWindowMessage& m){return m.message == WM_PAINT;})
+                .subscribe([this](const RxWindowMessage& m){
+                    m.out->first = true;
+			        PAINTSTRUCT ps = {};
+			        BeginPaint(m.window, &ps);
+			        l::wr::unique_gdi_end_paint ender(std::make_pair(m.window, &ps));
+			        m.out->second = this->PaintContent(ps);
+                });
+        }
 
 		l::wr::unique_close_window child;
-
-		LRESULT OnSize(const Context& , UINT , int cx, int cy)
-		{
-			if (child) 
-			{
-				SetWindowPos(
-					child.get(), NULL, 
-					0, 0, cx, cy,
-					SWP_NOZORDER | SWP_NOACTIVATE);
-			}
-			return 0;
-		}
 
 		LRESULT PaintContent(PAINTSTRUCT& )
 		{
 			return 0;
 		}
-
-		LRESULT OnPaint(const Context& context)
-		{
-			PAINTSTRUCT ps = {};
-			BeginPaint(context.window, &ps);
-			l::wr::unique_gdi_end_paint ender(std::make_pair(context.window, &ps));
-			return PaintContent(ps);
-		}
-
-		LRESULT OnPrintClient(const Context& context, HDC hdc, DWORD )
-		{
-			PAINTSTRUCT ps = {};
-			ps.hdc = hdc;
-			GetClientRect(context.window, &ps.rcPaint);
-			return PaintContent(ps);
-		}
-
-		LRESULT OnNCDestroy(const Context& )
-		{
-			PostQuitMessage(0);
-			return 0;
-		}
 	};
-
-	l::wnd::traits_builder<window> window_class_traits(tag&&);
-
-	void window_class_register(PCWSTR windowClass, WNDCLASSEX* wcex, tag&&)
-	{
-		wcex->style         = 0;
-		wcex->hIcon         = NULL;
-		wcex->hCursor       = LoadCursor(NULL, IDC_ARROW);
-		wcex->lpszMenuName  = NULL;
-		wcex->lpszClassName = windowClass;
-	}
 }
 
-template<typename Function, typename MessageTag>
-void window_message_error_contract(Function&& function, const RootWindow::Context& , MessageTag&&, RootWindow::tag&&)
+l::wnd::traits_builder<RootWindow::window> window_class_traits(RootWindow::tag&&);
+
+void window_class_register(PCWSTR windowClass, WNDCLASSEX* wcex, RootWindow::tag&&)
+{
+	wcex->hCursor       = LoadCursor(NULL, IDC_ARROW);
+	wcex->lpszClassName = windowClass;
+}
+
+template<typename T>
+std::pair<bool, LRESULT> window_class_dispatch(T t, const RootWindow::Context& context, RootWindow::tag&&)
+{
+    return dispatch_rx_window_message(context, t->messages);
+}
+
+template<typename Function>
+std::pair<bool, LRESULT> window_message_error_contract(Function&& function, const RootWindow::Context& context, RootWindow::tag&&)
 {
 	try
 	{
-		std::forward<Function>(function)();
+		return std::forward<Function>(function)(context);
 	}
 	catch(std::bad_alloc&&)
 	{
+        return std::make_pair(false, ERROR_OUTOFMEMORY);
 	}
-	catch(unique_winerror::exception&&)
+	catch(unique_winerror::exception&& e)
 	{
+        return std::make_pair(false, e.get());
 	}
-	catch(unique_hresult::exception&&)
+	catch(unique_hresult::exception&& e)
 	{
+        return std::make_pair(false, e.get());
 	}
 }
 
