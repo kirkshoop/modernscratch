@@ -86,17 +86,17 @@ bool operator!=(POINT lhs, POINT rhs) {return !(lhs == rhs);}
 namespace RootWindow
 {
     // tie the ADL methods together
-	struct tag {};
+    struct tag {};
 
-	typedef
-		l::wnd::Context<tag>
-	Context;
+    typedef
+        l::wnd::Context<tag>
+    Context;
 
     // note: no base class
-	struct window
-	{
+    struct window
+    {
         explicit window(HWND handle, CREATESTRUCT& cs)
-		{
+        {
             messages = rx::CreateSubject<rxmsg::message>();
 
             // post quit message
@@ -117,11 +117,11 @@ namespace RootWindow
                     return std::make_tuple(m.window, reinterpret_cast<HDC>(m.wParam), m.out);})
                 .subscribe([this](const std::tuple<HWND, HDC, l::wnd::dispatch_result*>& m){
                     rxmsg::set_handled(std::get<2>(m));
-			        PAINTSTRUCT ps = {};
-			        ps.hdc = std::get<1>(m);
-			        GetClientRect(std::get<0>(m), &ps.rcPaint);
+                    PAINTSTRUCT ps = {};
+                    ps.hdc = std::get<1>(m);
+                    GetClientRect(std::get<0>(m), &ps.rcPaint);
                     rxmsg::set_lResult(
-			            std::get<2>(m),
+                        std::get<2>(m),
                         this->PaintContent(ps)
                     );
                 });
@@ -132,11 +132,11 @@ namespace RootWindow
                     return !handled(m) && m.id == WM_PAINT;})
                 .subscribe([this](const rxmsg::message& m){
                     set_handled(m);
-			        PAINTSTRUCT ps = {};
-			        BeginPaint(m.window, &ps);
-			        l::wr::unique_gdi_end_paint ender(std::make_pair(m.window, &ps));
+                    PAINTSTRUCT ps = {};
+                    BeginPaint(m.window, &ps);
+                    l::wr::unique_gdi_end_paint ender(std::make_pair(m.window, &ps));
                     set_lResult(
-    			        m,
+                        m,
                         this->PaintContent(ps)
                     );
                 });
@@ -187,39 +187,39 @@ namespace RootWindow
 
         inline HWND CreateLabelFromLetter(wchar_t c, HINSTANCE hinst, HWND parent)
         {
-	        unique_winerror winerror;
+            unique_winerror winerror;
             std::pair<std::wstring, l::wr::unique_destroy_window> label;
 
             label.first.append(&c, &c+1);
-	        std::tie(winerror, label.second) = 
-		        l::wr::winerror_and_destroy_window(
-			        CreateWindow(
-				        L"Static", label.first.c_str(), 
-				        WS_CHILD | WS_VISIBLE,
-				        0, 0, 20, 30, 
-				        parent, NULL, 
-				        hinst, 
-				        NULL));
+            std::tie(winerror, label.second) = 
+                l::wr::winerror_and_destroy_window(
+                    CreateWindow(
+                        L"Static", label.first.c_str(), 
+                        WS_CHILD | WS_VISIBLE,
+                        0, 0, 20, 30, 
+                        parent, NULL, 
+                        hinst, 
+                        NULL));
 
-	        if (!winerror || !label.second)
-	        {
+            if (!winerror || !label.second)
+            {
                 winerror.throw_if();
-	        }
+            }
 
             auto result = label.second.get();
             labels.push_back(std::move(label));
             return result;
         }
 
-		LRESULT PaintContent(PAINTSTRUCT& )
-		{
-			return 0;
-		}
+        LRESULT PaintContent(PAINTSTRUCT& )
+        {
+            return 0;
+        }
 
         rxmsg::message::Subject messages;
         rx::ComposableDisposable cd;
-		std::list<std::pair<std::wstring, l::wr::unique_destroy_window>> labels;
-	};
+        std::list<std::pair<std::wstring, l::wr::unique_destroy_window>> labels;
+    };
 }
 
 //
@@ -230,8 +230,8 @@ l::wnd::traits_builder<RootWindow::window> window_class_traits(RootWindow::tag&&
 
 void window_class_register(PCWSTR windowClass, WNDCLASSEX* wcex, RootWindow::tag&&)
 {
-	wcex->hCursor       = LoadCursor(NULL, IDC_ARROW);
-	wcex->lpszClassName = windowClass;
+    wcex->hCursor       = LoadCursor(NULL, IDC_ARROW);
+    wcex->lpszClassName = windowClass;
 }
 
 template<typename T>
@@ -244,73 +244,73 @@ std::pair<bool, LRESULT> window_class_dispatch(T t, const RootWindow::Context& c
 template<typename Function>
 std::pair<bool, LRESULT> window_message_error_contract(Function&& function, const RootWindow::Context& context, RootWindow::tag&&)
 {
-	try
-	{
-		return std::forward<Function>(function)(context);
-	}
-	catch(std::bad_alloc&&)
-	{
+    try
+    {
+        return std::forward<Function>(function)(context);
+    }
+    catch(std::bad_alloc&&)
+    {
         return std::make_pair(false, ERROR_OUTOFMEMORY);
-	}
-	catch(unique_winerror::exception&& e)
-	{
+    }
+    catch(unique_winerror::exception&& e)
+    {
         return std::make_pair(false, e.get());
-	}
-	catch(unique_hresult::exception&& e)
-	{
+    }
+    catch(unique_hresult::exception&& e)
+    {
         return std::make_pair(false, e.get());
-	}
+    }
 }
 
 //
 // build the window
 //
 typedef
-	l::wnd::window_class<RootWindow::tag>
+    l::wnd::window_class<RootWindow::tag>
 RootWindowClass;
 
 int PASCAL
 wWinMain(HINSTANCE hinst, HINSTANCE, LPWSTR, int nShowCmd)
 {
-	unique_hresult hr;
+    unique_hresult hr;
 
-	hr.reset(CoInitialize(NULL));
-	if (!hr)
-	{
-		return FALSE;
-	}
-	ON_UNWIND_AUTO([&]{CoUninitialize();});
+    hr.reset(CoInitialize(NULL));
+    if (!hr)
+    {
+        return FALSE;
+    }
+    ON_UNWIND_AUTO([&]{CoUninitialize();});
 
-	InitCommonControls();
+    InitCommonControls();
 
-	RootWindowClass::Register(L"Scratch");
+    RootWindowClass::Register(L"Scratch");
 
-	unique_winerror winerror;
-	l::wr::unique_destroy_window window;
+    unique_winerror winerror;
+    l::wr::unique_destroy_window window;
 
-	std::tie(winerror, window) = 
-		l::wr::winerror_and_destroy_window(
-			CreateWindow(
-				L"Scratch", L"Scratch", 
-				WS_OVERLAPPEDWINDOW,
-				CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, 
-				NULL, NULL, 
-				hinst, 
-				NULL));
+    std::tie(winerror, window) = 
+        l::wr::winerror_and_destroy_window(
+            CreateWindow(
+                L"Scratch", L"Scratch", 
+                WS_OVERLAPPEDWINDOW,
+                CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, 
+                NULL, NULL, 
+                hinst, 
+                NULL));
 
-	if (!winerror || !window)
-	{
-		return winerror.get();
-	}
+    if (!winerror || !window)
+    {
+        return winerror.get();
+    }
 
-	ShowWindow(window.get(), nShowCmd);
+    ShowWindow(window.get(), nShowCmd);
 
-	MSG msg = {};
-	while (GetMessage(&msg, NULL, 0, 0)) 
-	{
-		TranslateMessage(&msg);
-		DispatchMessage(&msg);
-	}
+    MSG msg = {};
+    while (GetMessage(&msg, NULL, 0, 0)) 
+    {
+        TranslateMessage(&msg);
+        DispatchMessage(&msg);
+    }
     return 0;
 }
 
