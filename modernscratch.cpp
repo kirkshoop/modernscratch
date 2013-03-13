@@ -56,7 +56,7 @@ void set_handled(const message& m) {set_handled(m.out);}
 template<typename T> 
 l::wnd::dispatch_result dispatch(
     const l::wnd::Context<T>& c, 
-    const std::shared_ptr<rx::Subject<message>>& subject)
+    std::shared_ptr<rx::Subject<message>> subject)
 {
     l::wnd::dispatch_result result(false,0L);
     message rxmsg;
@@ -106,7 +106,7 @@ namespace RootWindow
                 .subscribe([this](const rxmsg::message& m){
                     set_handled(m);
                     cd.Dispose();
-    	    		PostQuitMessage(0);
+                    PostQuitMessage(0);
                 });
 
             // print client
@@ -157,17 +157,25 @@ namespace RootWindow
             auto msg = L"Time flies like an arrow";
 
             auto mainFormScheduler = std::make_shared<rx::win32::WindowScheduler>();
+
+#if DELAY_ON_WORKER_THREAD
             auto worker = std::make_shared<rx::EventLoopScheduler>();
+#endif
 
             for (int i = 0; msg[i]; ++i)
             {
                 auto label = CreateLabelFromLetter(msg[i], cs.hInstance, handle);
 
                 auto s = rx::from(mouseMove)
-                    .delay(std::chrono::milliseconds(i * 100 + 1),  worker)
+#if DELAY_ON_WORKER_THREAD
+                    // delay on worker thread
+                    .delay(std::chrono::milliseconds(i * 100 + 1), worker)
                     .observe_on(mainFormScheduler)
-                    .subscribe([=](const POINT& p)
-                    {
+#else
+                    // delay on ui thread
+                    .delay(std::chrono::milliseconds(i * 100 + 1), mainFormScheduler)
+#endif
+                    .subscribe([=](const POINT& p) {
                         SetWindowPos(label, nullptr, p.x+20*i, p.y-20, 20, 30, SWP_NOOWNERZORDER);
                         InvalidateRect(label, nullptr, true);
                         UpdateWindow(label);
@@ -180,11 +188,11 @@ namespace RootWindow
         inline HWND CreateLabelFromLetter(wchar_t c, HINSTANCE hinst, HWND parent)
         {
 	        unique_winerror winerror;
-            std::pair<std::wstring, l::wr::unique_close_window> label;
+            std::pair<std::wstring, l::wr::unique_destroy_window> label;
 
             label.first.append(&c, &c+1);
 	        std::tie(winerror, label.second) = 
-		        l::wr::winerror_and_close_window(
+		        l::wr::winerror_and_destroy_window(
 			        CreateWindow(
 				        L"Static", label.first.c_str(), 
 				        WS_CHILD | WS_VISIBLE,
@@ -210,7 +218,7 @@ namespace RootWindow
 
         rxmsg::message::Subject messages;
         rx::ComposableDisposable cd;
-		std::list<std::pair<std::wstring, l::wr::unique_close_window>> labels;
+		std::list<std::pair<std::wstring, l::wr::unique_destroy_window>> labels;
 	};
 }
 
@@ -278,10 +286,10 @@ wWinMain(HINSTANCE hinst, HINSTANCE, LPWSTR, int nShowCmd)
 	RootWindowClass::Register(L"Scratch");
 
 	unique_winerror winerror;
-	l::wr::unique_close_window window;
+	l::wr::unique_destroy_window window;
 
 	std::tie(winerror, window) = 
-		l::wr::winerror_and_close_window(
+		l::wr::winerror_and_destroy_window(
 			CreateWindow(
 				L"Scratch", L"Scratch", 
 				WS_OVERLAPPEDWINDOW,
