@@ -36,6 +36,8 @@ namespace rxmsg {
 struct message 
 {
     typedef std::shared_ptr<rx::Subject<message>> Subject;
+    typedef std::shared_ptr<rx::Observable<message>> Observable;
+    typedef std::shared_ptr<rx::Observer<message>> Observer;
 
     HWND window;
     UINT id;
@@ -52,10 +54,11 @@ void set_lResult(const message& m, LRESULT r) {set_lResult(m.out, r);}
 bool handled(const message& m) {return handled(m.out);}
 void set_handled(const message& m) {set_handled(m.out);}
 
+
 template<typename T> 
 l::wnd::dispatch_result dispatch(
     const l::wnd::Context<T>& c, 
-    std::shared_ptr<rx::Subject<message>> subject)
+    message::Observer observer)
 {
     l::wnd::dispatch_result result(false,0L);
     message rxmsg;
@@ -66,15 +69,128 @@ l::wnd::dispatch_result dispatch(
     rxmsg.id = c.message;
     rxmsg.out = &result;
 
-    subject->OnNext(rxmsg);
+    observer->OnNext(rxmsg);
     if (rxmsg.id == WM_NCDESTROY) 
     {
-        subject->OnCompleted();
+        observer->OnCompleted();
     }
     return result;
 }
 
+template<class Tag>
+struct window_size : public std::enable_shared_from_this<window_size<Tag>> {
+    typedef Tag tag;
+    typedef decltype(rx_window_traits(tag())) traits;
+    typedef typename traits::coordinate coordinate;
+    typedef typename traits::point point;
+    typedef typename traits::extent extent;
+    typedef std::shared_ptr<rx::Observer<coordinate>> ObserverCoordinate;
+    typedef std::shared_ptr<rx::Observer<point>> ObserverPoint;
+    typedef std::shared_ptr<rx::Observer<extent>> ObserverExtent;
+    typedef std::shared_ptr<rx::Subject<coordinate>> SubjectCoordinate;
+    typedef std::shared_ptr<rx::Subject<point>> SubjectPoint;
+    typedef std::shared_ptr<rx::Subject<extent>> SubjectExtent;
+
+    window_size(HWND window, message::Observable messages) : window(window), messages(messages), subscribed(0) {
+    }
+
+    rx::Disposable subscribeOrigin(const ObserverPoint& observer) {
+        return subscribe(Origin, observer);}
+    rx::Disposable subscribeExtent(const ObserverExtent& observer) {
+        return subscribe(Extent, observer);}
+    rx::Disposable subscribeLeft(const ObserverCoordinate& observer) {
+        return subscribe(Left, observer);}
+    rx::Disposable subscribeTop(const ObserverCoordinate& observer) {
+        return subscribe(Top, observer);}
+    rx::Disposable subscribeRight(const ObserverCoordinate& observer) {
+        return subscribe(Right, observer);}
+    rx::Disposable subscribeBottom(const ObserverCoordinate& observer) {
+        return subscribe(Bottom, observer);}
+ 
+private:
+    template<class Subject, class Observer>
+    rx::Disposable subscribe(const Subject& subject, const Observer& observer) {
+        auto keepAlive = this->shared_from_this();
+        if (++subscribed == 1) {
+            sd.Set(rx::from(messages)
+                .where([keepAlive, this](const rxmsg::message& m){
+                    return !handled(m) && m.id == WM_WINDOWSPOSCHANGED;})
+                .select([](const rxmsg::message& m){
+                    set_handled(m);
+                    return *(WINDOWPOS*)m.lParam;})
+                .subscribe(
+                    [keepAlive, this](const WINDOWPOS& pos){
+                        auto x = coodinate(pos.x);
+                        auto y = coodinate(pos.y);
+                        auto cx = coodinate(pos.cx);
+                        auto cy = coodinate(pos.cy);
+                        Origin.OnNext(point(x,y));
+                        Extent.OnNext(extent(cx, cy));
+                        Left.OnNext(x);
+                        Top.OnNext(y);
+                        Right.OnNext(x+cx);
+                        Bottom.OnNext(y+cy);},
+                    [keepAlive, this](){
+                        Origin.OnCompleted();
+                        Extent.OnCompleted();
+                        Left.OnCompleted();
+                        Right.OnCompleted();
+                        Top.OnCompleted();
+                        Bottom.OnCompleted();}, 
+                    [keepAlive, this](const std::exception_ptr& e){
+                        Origin.OnError(e);
+                        Extent.OnError(e);
+                        Left.OnError(e);
+                        Right.OnError(e);
+                        Top.OnError(e);
+                        Bottom.OnError(e);
+                }));
+        }
+        rx::ComposableDisposable cd;
+        cd.Add(rx::Disposable([keepAlive, this](){
+            if(--subscribed == 0){
+                sd.Dispose();}}));
+        cd.Add(subject->Subscribe(observable));
+        return cd;
+    }
+
+    message::Observable messages;
+    HWND window;
+    std::atomic<int> subscribed;
+    rx::SharedDisposable sd;
+    SubjectPoint Origin;
+    SubjectExtent Extent;
+    SubjectCoordinate Left;
+    SubjectCoordinate Top;
+    SubjectCoordinate Right;
+    SubjectCoordinate Bottom;
+};
+
 }
+
+namespace rxmsg{namespace traits{
+    template<class Coordinate, class Point, class Extent>
+    struct window_traits_builder {
+        typedef Coordinate coordinate;
+        struct point {
+            Point p;
+            point(coordinate x, coordinate y) {p.x = x; p.y = y;}
+            explicit point(const Point& p) : p(p) {}
+            operator Point&() {return p;}
+            operator const Point&() const {return p;}
+        };
+        struct extent {
+            Extent e;
+            extent(coordinate cx, coordinate cy) {e.cx = cx; e.cy = cy;}
+            explicit extent(const Extent& e) : e(e) {}
+            operator Extent&() {return e;}
+            operator const Extent&() const {return e;}
+        };
+    };
+
+    struct Default {};
+}}
+rxmsg::traits::window_traits_builder<UINT, POINT, SIZE> rx_window_traits(rxmsg::traits::Default&&);
 
 bool operator==(POINT lhs, POINT rhs)
 {
@@ -95,8 +211,9 @@ namespace RootWindow
     struct window
     {
         window(HWND handle, CREATESTRUCT& cs)
+            : messages(rx::CreateSubject<rxmsg::message>())
+            , size(handle, messages)
         {
-            messages = rx::CreateSubject<rxmsg::message>();
 
             // post quit message
             rx::from(messages)
@@ -227,6 +344,7 @@ namespace RootWindow
         }
 
         rxmsg::message::Subject messages;
+        rxmsg::window_size<rxmsg::traits::Default> size;
         rx::ComposableDisposable cd;
         std::list<std::pair<std::wstring, l::wr::unique_destroy_window>> labels;
     };
