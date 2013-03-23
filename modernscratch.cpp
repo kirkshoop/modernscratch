@@ -28,7 +28,7 @@ namespace rx=rxcpp;
 #define UNIQUE_WINERROR_DEFINE_REPORTS
 #define UNIQUE_HRESULT_DEFINE_REPORTS
 #define LIBRARIES_NAMESPACE mylib
-#include "..\libraries\libraries.h"
+#include "libraries.h"
 namespace l=LIBRARIES_NAMESPACE;
 
 namespace rxmsg {
@@ -140,12 +140,21 @@ namespace RootWindow
                     );
                 });
 
+            // disable erase background
+            rx::from(messages)
+                .where([this](const rxmsg::message& m){
+                    return !handled(m) && m.id == WM_ERASEBKGND;})
+                .subscribe([this](const rxmsg::message& m){
+                    set_handled(m);
+                    set_lResult(m,TRUE);
+                });
+
             // note: distinct_until_changed is necessary; while 
             //  Winforms filters duplicate mouse moves, 
             //  user32 doesn't filter this for you: http://blogs.msdn.com/b/oldnewthing/archive/2003/10/01/55108.aspx
 
             auto mouseMove = rx::from(messages)
-                .where([this](const rxmsg::message& m){
+                .where([this](const rxmsg::message& m) {
                     return !handled(m) && m.id == WM_MOUSEMOVE;})
                 .select([](const rxmsg::message& m) {
                     POINT p = {GET_X_LPARAM(m.lParam), GET_Y_LPARAM(m.lParam)}; return p;})
@@ -210,8 +219,10 @@ namespace RootWindow
             return result;
         }
 
-        LRESULT PaintContent(PAINTSTRUCT& )
+        LRESULT PaintContent(PAINTSTRUCT& ps)
         {
+            l::wr::unique_gdi_brush gray(CreateSolidBrush(RGB(240,240,240)));
+            FillRect(ps.hdc, &ps.rcPaint, gray.get());
             return 0;
         }
 
