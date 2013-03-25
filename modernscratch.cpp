@@ -35,6 +35,57 @@ namespace rx=rxcpp;
 #include "libraries.h"
 namespace l=LIBRARIES_NAMESPACE;
 
+
+struct Count {
+    Count() : nexts(0), completions(0), errors(0), disposals(0) {}
+    std::atomic<int> nexts;
+    std::atomic<int> completions;
+    std::atomic<int> errors;
+    std::atomic<int> disposals;
+};
+template <class T>
+std::shared_ptr<rxcpp::Observable<T>> Record(
+    const std::shared_ptr<rxcpp::Observable<T>>& source,
+    Count* count
+    )
+{
+    return rxcpp::CreateObservable<T>(
+        [=](std::shared_ptr<rxcpp::Observer<T>> observer)
+        {
+            rxcpp::ComposableDisposable cd;
+            cd.Add(rxcpp::Disposable([=](){
+                ++count->disposals;}));
+            cd.Add(rxcpp::Subscribe(
+                source,
+            // on next
+                [=](T element)
+                {
+                    ++count->nexts;
+                    observer->OnNext(std::move(element));
+                },
+            // on completed
+                [=]
+                {
+                    ++count->completions;
+                    observer->OnCompleted();
+                },
+            // on error
+                [=](const std::exception_ptr& error)
+                {
+                    ++count->errors;
+                    observer->OnError(error);
+                }));
+            return cd;
+        });
+}
+
+struct record {};
+template<class T>
+rxcpp::Binder<std::shared_ptr<rxcpp::Observable<T>>> rxcpp_chain(record&&, const std::shared_ptr<rxcpp::Observable<T>>& source, Count* count) {
+    return rxcpp::from(Record(source, count));
+}
+
+
 namespace rxmsg {
 // rx window message allows message handling via Rx
 struct message 
@@ -139,7 +190,6 @@ struct window_size : public std::enable_shared_from_this<window_size<Tag>> {
 
 private:
     void initSubjects() {
-        windowScheduler = std::make_shared<rx::win32::WindowScheduler>();
         subjectOrigin = rx::CreateSubject<Point>();
         subjectExtent = rx::CreateSubject<Extent>();
         subjectLeft = rx::CreateSubject<Coordinate>();
@@ -209,7 +259,6 @@ private:
     std::atomic<int> subscribed;
     rx::SharedDisposable sdMessages;
     rx::SharedDisposable sdBind;
-    rx::Scheduler::shared windowScheduler;
     SubjectPoint subjectOrigin;
     SubjectExtent subjectExtent;
     SubjectCoordinate subjectLeft;
@@ -250,6 +299,8 @@ bool operator==(POINT lhs, POINT rhs)
 }
 bool operator!=(POINT lhs, POINT rhs) {return !(lhs == rhs);}
 
+typedef std::queue<std::pair<std::string, std::exception_ptr>> Exceptions;
+
 namespace RootWindow
 {
     // tie the ADL methods together
@@ -263,7 +314,9 @@ namespace RootWindow
     struct window
     {
         window(HWND handle, CREATESTRUCT& cs)
-            : text(rx::CreateSubject<std::wstring>())
+            : root(handle)
+            , exceptions(reinterpret_cast<Exceptions*>(cs.lpCreateParams))
+            , text(rx::CreateSubject<std::wstring>())
             , messages(rx::CreateSubject<rxmsg::message>())
             , size(std::make_shared<rxmsg::window_size<rxmsg::traits::Default>>(handle, messages))
             , edit(CreateChildWindow(L"Edit", L"", POINT(), cs.hInstance, handle))
@@ -285,7 +338,9 @@ namespace RootWindow
             rx::from(messages)
                 .where([this](const rxmsg::message& m){
                     return !handled(m) && m.id == WM_COMMAND && HIWORD(m.wParam) == EN_CHANGE && ((HWND)m.lParam) == edit.get();})
-                .subscribe([this](const rxmsg::message& m){
+                .subscribe(
+                // on next
+                [this](const rxmsg::message& m){
                     set_handled(m);
                     auto length = Edit_GetTextLength(edit.get());
                     std::wstring line;
@@ -293,7 +348,12 @@ namespace RootWindow
                     line.resize(length);
                     Edit_GetText(edit.get(), &line[0], length + 1);
                     text->OnNext(line);
-                });
+                },
+                // on completed
+                [](){},
+                //on error
+                [this](const std::exception_ptr& e){
+                    exceptions->push(std::make_pair("error in edit changed: ", e));});
 
             // post quit message
             rx::from(messages)
@@ -311,7 +371,9 @@ namespace RootWindow
                     return !handled(m) && m.id == WM_PRINTCLIENT;})
                 .select([](const rxmsg::message& m) {
                     return std::make_tuple(m.window, reinterpret_cast<HDC>(m.wParam), m.out);})
-                .subscribe([this](const std::tuple<HWND, HDC, l::wnd::dispatch_result*>& m){
+                .subscribe(
+                //on next
+                [this](const std::tuple<HWND, HDC, l::wnd::dispatch_result*>& m){
                     rxmsg::set_handled(std::get<2>(m));
                     PAINTSTRUCT ps = {};
                     ps.hdc = std::get<1>(m);
@@ -320,13 +382,20 @@ namespace RootWindow
                         std::get<2>(m),
                         this->PaintContent(ps)
                     );
-                });
+                },
+                // on completed
+                [](){},
+                //on error
+                [this](const std::exception_ptr& e){
+                    exceptions->push(std::make_pair("error in printclient: ", e));});
 
             // paint
             rx::from(messages)
                 .where([this](const rxmsg::message& m){
                     return !handled(m) && m.id == WM_PAINT;})
-                .subscribe([this](const rxmsg::message& m){
+                .subscribe(
+                // on next
+                [this](const rxmsg::message& m){
                     set_handled(m);
                     PAINTSTRUCT ps = {};
                     BeginPaint(m.window, &ps);
@@ -335,7 +404,12 @@ namespace RootWindow
                         m,
                         this->PaintContent(ps)
                     );
-                });
+                },
+                // on completed
+                [](){},
+                //on error
+                [this](const std::exception_ptr& e){
+                    exceptions->push(std::make_pair("error in paint: ", e));});
 
             // disable erase background
             rx::from(messages)
@@ -354,48 +428,56 @@ namespace RootWindow
             auto worker = std::make_shared<rx::EventLoopScheduler>();
 #endif
             rx::from(text)
-                .subscribe([=](const std::wstring& msg){
+                .subscribe(
+                // on next
+                [=](const std::wstring& msg){
                     cd.Dispose();
                     labels.clear();
-
-                    // note: distinct_until_changed is necessary; while 
-                    //  Winforms filters duplicate mouse moves, 
-                    //  user32 doesn't filter this for you: http://blogs.msdn.com/b/oldnewthing/archive/2003/10/01/55108.aspx
-
-                    auto mouseMove = rx::from(messages)
-                        .where([this](const rxmsg::message& m) {
-                            return !handled(m) && m.id == WM_MOUSEMOVE;})
-                        .select([this](const rxmsg::message& m) {
-                            POINT p = {GET_X_LPARAM(m.lParam), GET_Y_LPARAM(m.lParam)}; this->mouseLoc = p; return p;})
-                        .distinct_until_changed()
-                        .publish();
 
                     for (int i = 0; msg[i]; ++i)
                     {
                         POINT loc = {mouseLoc.x+20*i, std::max(30L, mouseLoc.y-20)};
                         auto label = CreateLabelFromLetter(msg[i], loc, cs.hInstance, handle);
 
-                        auto s = rx::from(mouseMove)
+                        // note: distinct_until_changed is necessary; while 
+                        //  Winforms filters duplicate mouse moves, 
+                        //  user32 doesn't filter this for you: http://blogs.msdn.com/b/oldnewthing/archive/2003/10/01/55108.aspx
+
+                        auto s = rx::from(messages)
+                            .where([label, this](const rxmsg::message& m) {
+                                return !handled(m) && m.id == WM_MOUSEMOVE && IsWindow(label);})
+                            .select([this](const rxmsg::message& m) {
+                                POINT p = {GET_X_LPARAM(m.lParam), GET_Y_LPARAM(m.lParam)}; this->mouseLoc = p; return p;})
+                            .distinct_until_changed()
 #if DELAY_ON_WORKER_THREAD
                             // delay on worker thread
                             .delay(std::chrono::milliseconds(i * 100 + 1), worker)
-                            .observe_on(mainFormScheduler)
+//                            .observe_on(mainFormScheduler)
 #else
                             // delay on ui thread
                             .delay(std::chrono::milliseconds(i * 100 + 1), mainFormScheduler)
 #endif
-                            .subscribe([=](const POINT& p) {
-                                if (!IsWindow(label)) {
-                                    throw std::logic_error("window already destroyed");
-                                }
+                            .subscribe(
+                            // on next
+                            [=](const POINT& p) {
                                 SetWindowPos(label, nullptr, p.x+20*i, std::max(30L, p.y-20), 20, 30, SWP_NOOWNERZORDER);
                                 InvalidateRect(label, nullptr, true);
                                 UpdateWindow(label);
-                            });
+                            },
+                            // on completed
+                            [](){},
+                            //on error
+                            [this](const std::exception_ptr& e){
+                                exceptions->push(std::make_pair("error in label onmove stream: ", e));});
 
                         cd.Add(std::move(s));
                     }
-            });
+            },
+            // on completed
+            [](){},
+            //on error
+            [this](const std::exception_ptr& e){
+                exceptions->push(std::make_pair("error in label onmove stream: ", e));});
 
             auto msg = L"Time flies like an arrow";
             Edit_SetText(edit.get(), msg);
@@ -446,6 +528,8 @@ namespace RootWindow
             return 0;
         }
 
+        HWND root;
+        Exceptions* exceptions;
         std::shared_ptr<rx::Subject<std::wstring>> text;
         rxmsg::message::Subject messages;
         std::shared_ptr<rxmsg::window_size<rxmsg::traits::Default>> size;
@@ -519,6 +603,8 @@ wWinMain(HINSTANCE hinst, HINSTANCE, LPWSTR, int nShowCmd)
 
     InitCommonControls();
 
+    Exceptions exceptions;
+
     RootWindowClass::Register(L"Scratch");
 
     unique_winerror winerror;
@@ -526,13 +612,13 @@ wWinMain(HINSTANCE hinst, HINSTANCE, LPWSTR, int nShowCmd)
 
     std::tie(winerror, window) = 
         l::wr::winerror_and_destroy_window(
-            CreateWindow(
+            CreateWindowW(
                 L"Scratch", L"Scratch", 
                 WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
                 CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, 
                 NULL, NULL, 
                 hinst, 
-                NULL));
+                (LPVOID)&exceptions));
 
     if (!winerror || !window)
     {
@@ -546,6 +632,18 @@ wWinMain(HINSTANCE hinst, HINSTANCE, LPWSTR, int nShowCmd)
     {
         TranslateMessage(&msg);
         DispatchMessage(&msg);
+        while(!exceptions.empty()) {
+            std::string context;
+            try {
+                std::exception_ptr next;
+                std::tie(context, next) = exceptions.front();
+                exceptions.pop();
+                std::rethrow_exception(next);
+            } catch (const std::exception& e) {
+                context.append(e.what());
+                MessageBoxA(window.get(), context.c_str(), "scratch exception", MB_OK);
+            }
+        }
     }
     return 0;
 }
