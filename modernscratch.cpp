@@ -267,6 +267,13 @@ private:
     SubjectCoordinate subjectBottom;
 };
 
+template<class Tag>
+class stack {
+public:
+private:
+    std::vector<std::shared_ptr<window_size<Tag>>> stacked;
+};
+
 }
 
 namespace rxmsg{namespace traits{
@@ -422,11 +429,39 @@ namespace RootWindow
 
             // set up labels and query
 
-            auto mainFormScheduler = std::make_shared<rx::win32::WindowScheduler>();
-
 #if DELAY_ON_WORKER_THREAD
             auto worker = std::make_shared<rx::EventLoopScheduler>();
 #endif
+            auto mainFormScheduler = std::make_shared<rx::win32::WindowScheduler>();
+
+            auto mouseDown = rx::from(messages)
+                .where([this](const rxmsg::message& m) {
+                    return !handled(m) && m.id == WM_LBUTTONDOWN;})
+                .publish();
+
+            auto mouseUp = rx::from(messages)
+                .where([this](const rxmsg::message& m) {
+                    return !handled(m) && m.id == WM_LBUTTONUP;})
+                .publish();
+
+            // note: distinct_until_changed is necessary; while 
+            //  Winforms filters duplicate mouse moves, 
+            //  user32 doesn't filter this for you: http://blogs.msdn.com/b/oldnewthing/archive/2003/10/01/55108.aspx
+
+            //this only produces mouse move events 
+            //between an LButtonDown and the next LButtonUp
+            auto mouseDrag = rx::from(mouseDown)
+                .select_many([=, this](const rxmsg::message&) {
+                    return rx::from(messages)
+                        .take_until(mouseUp)
+                        .where([this](const rxmsg::message& m) {
+                            return !handled(m) && m.id == WM_MOUSEMOVE;})
+                        .select([this](const rxmsg::message& m) {
+                            POINT p = {GET_X_LPARAM(m.lParam), GET_Y_LPARAM(m.lParam)}; this->mouseLoc = p; return p;})
+                        .distinct_until_changed()
+                        .publish();})
+                .publish();
+
             rx::from(text)
                 .subscribe(
                 // on next
@@ -439,20 +474,14 @@ namespace RootWindow
                         POINT loc = {mouseLoc.x+20*i, std::max(30L, mouseLoc.y-20)};
                         auto label = CreateLabelFromLetter(msg[i], loc, cs.hInstance, handle);
 
-                        // note: distinct_until_changed is necessary; while 
-                        //  Winforms filters duplicate mouse moves, 
-                        //  user32 doesn't filter this for you: http://blogs.msdn.com/b/oldnewthing/archive/2003/10/01/55108.aspx
-
-                        auto s = rx::from(messages)
-                            .where([label, this](const rxmsg::message& m) {
-                                return !handled(m) && m.id == WM_MOUSEMOVE && IsWindow(label);})
-                            .select([this](const rxmsg::message& m) {
-                                POINT p = {GET_X_LPARAM(m.lParam), GET_Y_LPARAM(m.lParam)}; this->mouseLoc = p; return p;})
-                            .distinct_until_changed()
+                        auto s = rx::from(mouseDrag)
+                            // work around dispose bug
+                            .where([=](const POINT& p) {
+                                return IsWindow(label);})
 #if DELAY_ON_WORKER_THREAD
                             // delay on worker thread
                             .delay(std::chrono::milliseconds(i * 100 + 1), worker)
-//                            .observe_on(mainFormScheduler)
+                            .observe_on(mainFormScheduler)
 #else
                             // delay on ui thread
                             .delay(std::chrono::milliseconds(i * 100 + 1), mainFormScheduler)
