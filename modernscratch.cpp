@@ -476,7 +476,7 @@ namespace RootWindow
 
                         auto s = rx::from(mouseDrag)
                             // work around dispose bug
-                            .where([=](const POINT& p) {
+                            .where([=](const POINT& ) {
                                 return IsWindow(label);})
 #if DELAY_ON_WORKER_THREAD
                             // delay on worker thread

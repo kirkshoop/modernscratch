@@ -1,0 +1,6 @@
+[submodule "ext/kirkshoop/libraries"]
+	path = ext/kirkshoop/libraries
+	url = https://github.com/kirkshoop/libraries.git
+[submodule "ext/Rx"]
+	path = ext/Rx
+	url = https://git01.codeplex.com/rx
