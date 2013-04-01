@@ -17,6 +17,8 @@
 #pragma comment(lib, "Comctl32.lib")
 #pragma comment(lib, "Ole32.lib")
 
+#pragma comment(linker,"\"/manifestdependency:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
+
 #include <new>
 #include <utility>
 #include <memory>
@@ -175,7 +177,10 @@ struct window_size : public std::enable_shared_from_this<window_size<Tag>> {
         sdBind.Set(rx::from(p)
             .combine_latest(e)
             .subscribe([keepAlive, this](const std::tuple<Point, Extent>& box){
-                MoveWindow(window, std::get<0>(box).p.x, std::get<0>(box).p.y, std::get<1>(box).e.cx, std::get<1>(box).e.cy, TRUE);}));
+                SetWindowPos(window, nullptr, std::get<0>(box).p.x, std::get<0>(box).p.y, std::get<1>(box).e.cx, std::get<1>(box).e.cy, SWP_NOOWNERZORDER);
+                //MoveWindow(window, std::get<0>(box).p.x, std::get<0>(box).p.y, std::get<1>(box).e.cx, std::get<1>(box).e.cy, TRUE);
+                keepAlive->updateSubjects(std::get<0>(box).p.x, std::get<0>(box).p.y, std::get<0>(box).p.x + std::get<1>(box).e.cx, std::get<0>(box).p.y + std::get<1>(box).e.cy);
+            }));
         return sdBind;
     }
     rx::Disposable bind(const ObservableCoordinate& l, const ObservableCoordinate& t, const ObservableCoordinate& r, const ObservableCoordinate& b) {
@@ -184,7 +189,10 @@ struct window_size : public std::enable_shared_from_this<window_size<Tag>> {
         sdBind.Set(rx::from(l)
             .combine_latest(t, r, b)
             .subscribe([keepAlive, this](const std::tuple<Coordinate, Coordinate, Coordinate, Coordinate>& box){
-                MoveWindow(window, std::get<0>(box), std::get<1>(box), std::get<2>(box) - std::get<0>(box), std::get<3>(box) - std::get<1>(box), TRUE);}));
+                SetWindowPos(window, nullptr, std::get<0>(box), std::get<1>(box), std::get<2>(box) - std::get<0>(box), std::get<3>(box) - std::get<1>(box), SWP_NOOWNERZORDER);
+                //MoveWindow(window, std::get<0>(box), std::get<1>(box), std::get<2>(box) - std::get<0>(box), std::get<3>(box) - std::get<1>(box), TRUE);
+                keepAlive->updateSubjects(std::get<0>(box), std::get<1>(box), std::get<2>(box), std::get<3>(box));
+            }));
         return sdBind;
     }
 
@@ -196,6 +204,18 @@ private:
         subjectTop = rx::CreateSubject<Coordinate>();
         subjectRight = rx::CreateSubject<Coordinate>();
         subjectBottom = rx::CreateSubject<Coordinate>();
+    }
+    void updateSubjects(Coordinate top, Coordinate left, Coordinate right, Coordinate bottom) {
+        auto x = left;
+        auto y = top;
+        auto cx = right - left;
+        auto cy = bottom - top;
+        subjectOrigin->OnNext(Point(x,y));
+        subjectExtent->OnNext(Extent(cx, cy));
+        subjectLeft->OnNext(x);
+        subjectTop->OnNext(y);
+        subjectRight->OnNext(right);
+        subjectBottom->OnNext(bottom);
     }
     template<class Subject>
     typename rx::subject_observable<Subject>::type create(const Subject& subject) {
@@ -214,16 +234,11 @@ private:
                         [keepAlive](const WINDOWPOS& pos){
                             RECT client = {};
                             GetClientRect(pos.hwnd, &client);
-                            auto x = Coordinate(client.left);
-                            auto y = Coordinate(client.top);
-                            auto cx = Coordinate(client.right - client.left);
-                            auto cy = Coordinate(client.bottom - client.top);
-                            keepAlive->subjectOrigin->OnNext(Point(x,y));
-                            keepAlive->subjectExtent->OnNext(Extent(cx, cy));
-                            keepAlive->subjectLeft->OnNext(x);
-                            keepAlive->subjectTop->OnNext(y);
-                            keepAlive->subjectRight->OnNext(client.right);
-                            keepAlive->subjectBottom->OnNext(client.bottom);},
+                            keepAlive->updateSubjects(
+                                Coordinate(client.top), 
+                                Coordinate(client.left), 
+                                Coordinate(client.right), 
+                                Coordinate(client.bottom));},
                     // on completed
                         [keepAlive](){
                             keepAlive->subjectOrigin->OnCompleted();
