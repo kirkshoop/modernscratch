@@ -310,540 +310,26 @@ struct messageId {
 };
 
 namespace detail {
-struct OriginFrom {};
-struct ExtentFrom {};
-struct LeftFrom {};
-struct TopFrom {};
-struct RightFrom {};
-struct BottomFrom {};
-struct WidthFrom {};
-struct HeightFrom {};
-struct CenterFrom {};
-struct MiddleFrom {};
-template<class Tag, class T>
-struct From {
-    From(T t) : t(std::move(t)) {}
-    T t;
-};
-template<class FromTag, class T>
-auto make_from(T t) 
-    -> decltype(From<FromTag, T>(std::move(t))) {
-    return      From<FromTag, T>(std::move(t));
-}
-}
-template<class ObservablePoint>
-auto originFrom(ObservablePoint o) 
-    ->     detail::From<detail::OriginFrom, ObservablePoint> {
-    return detail::From<detail::OriginFrom, ObservablePoint>(std::move(o));}
-template<class ObservableExtent>
-auto extentFrom(ObservableExtent o) 
-    ->     detail::From<detail::ExtentFrom, ObservableExtent> {
-    return detail::From<detail::ExtentFrom, ObservableExtent>(std::move(o));}
-template<class ObservableXCoordinate>
-auto leftFrom(ObservableXCoordinate o) 
-    ->     detail::From<detail::LeftFrom, ObservableXCoordinate> {
-    return detail::From<detail::LeftFrom, ObservableXCoordinate>(std::move(o));}
-template<class ObservableYCoordinate>
-auto topFrom(ObservableYCoordinate o) 
-    ->     detail::From<detail::TopFrom, ObservableYCoordinate> {
-    return detail::From<detail::TopFrom, ObservableYCoordinate>(std::move(o));}
-template<class ObservableXCoordinate>
-auto rightFrom(ObservableXCoordinate o) 
-    ->     detail::From<detail::RightFrom, ObservableXCoordinate> {
-    return detail::From<detail::RightFrom, ObservableXCoordinate>(std::move(o));}
-template<class ObservableYCoordinate>
-auto bottomFrom(ObservableYCoordinate o) 
-    ->     detail::From<detail::BottomFrom, ObservableYCoordinate> {
-    return detail::From<detail::BottomFrom, ObservableYCoordinate>(std::move(o));}
-template<class ObservableXExtent>
-auto widthFrom(ObservableXExtent o) 
-    ->     detail::From<detail::WidthFrom, ObservableXExtent> {
-    return detail::From<detail::WidthFrom, ObservableXExtent>(std::move(o));}
-template<class ObservableYExtent>
-auto heightFrom(ObservableYExtent o) 
-    ->     detail::From<detail::HeightFrom, ObservableYExtent> {
-    return detail::From<detail::HeightFrom, ObservableYExtent>(std::move(o));}
-template<class ObservableXCoordinate>
-auto centerFrom(ObservableXCoordinate o) 
-    ->     detail::From<detail::CenterFrom, ObservableXCoordinate> {
-    return detail::From<detail::CenterFrom, ObservableXCoordinate>(std::move(o));}
-template<class ObservableYCoordinate>
-auto middleFrom(ObservableYCoordinate o) 
-    ->     detail::From<detail::MiddleFrom, ObservableYCoordinate> {
-    return detail::From<detail::MiddleFrom, ObservableYCoordinate>(std::move(o));}
-
-template<class Tag>
-struct Measurement {
-    typedef Tag tag;
-    typedef decltype(rx_window_traits(tag())) traits;
-    typedef typename traits::Message Message;
-    typedef typename traits::XCoordinate XCoordinate;
-    typedef typename traits::YCoordinate YCoordinate;
-    typedef typename traits::XExtent XExtent;
-    typedef typename traits::YExtent YExtent;
-    typedef typename traits::Point Point;
-    typedef typename traits::Extent Extent;
-
-    Measurement() {}
-    Measurement(
-        XCoordinate l, YCoordinate t,
-        XCoordinate r, YCoordinate b) : 
-        left(std::move(l)), top(std::move(t)),
-        right(std::move(r)), bottom(std::move(b)) {}
-    XCoordinate left;
-    YCoordinate top;
-    XCoordinate right;
-    YCoordinate bottom;
-    XExtent width() const {return right - left;}
-    YExtent height() const {return bottom - top;}
-    Point origin() const {return Point(left, top);}
-    Extent extent() const {return Extent(width(), height());}
-    XCoordinate center() const {return left + (width() / 2);}
-    YCoordinate middle() const {return top + (height() / 2);}
-};
-
-template<class Tag>
-bool operator==(const Measurement<Tag>& l, const Measurement<Tag>& r) {
-    return l.left == r.left && l.top == r.top && l.right == r.right && l.bottom == r.bottom;
-}
-
-template<class Tag>
-struct window_size : public std::enable_shared_from_this<window_size<Tag>> {
-    typedef Tag tag;
-    typedef decltype(rx_window_traits(tag())) traits;
-    typedef typename traits::Message Message;
-    typedef typename traits::XCoordinate XCoordinate;
-    typedef typename traits::YCoordinate YCoordinate;
-    typedef typename traits::XExtent XExtent;
-    typedef typename traits::YExtent YExtent;
-    typedef typename traits::Point Point;
-    typedef typename traits::Extent Extent;
-    typedef typename traits::Rect Rect;
-    typedef Measurement<tag> measurement;
-    typedef std::shared_ptr<rx::Observer<XCoordinate>> ObserverXCoordinate;
-    typedef std::shared_ptr<rx::Observer<YCoordinate>> ObserverYCoordinate;
-    typedef std::shared_ptr<rx::Observer<XExtent>> ObserverXExtent;
-    typedef std::shared_ptr<rx::Observer<YExtent>> ObserverYExtent;
-    typedef std::shared_ptr<rx::Observer<Point>> ObserverPoint;
-    typedef std::shared_ptr<rx::Observer<Extent>> ObserverExtent;
-    typedef std::shared_ptr<rx::Observable<XCoordinate>> ObservableXCoordinate;
-    typedef std::shared_ptr<rx::Observable<YCoordinate>> ObservableYCoordinate;
-    typedef std::shared_ptr<rx::Observable<XExtent>> ObservableXExtent;
-    typedef std::shared_ptr<rx::Observable<YExtent>> ObservableYExtent;
-    typedef std::shared_ptr<rx::Observable<Point>> ObservablePoint;
-    typedef std::shared_ptr<rx::Observable<Extent>> ObservableExtent;
-    typedef std::shared_ptr<rx::Observable<std::tuple<XCoordinate, YCoordinate, XCoordinate, YCoordinate>>> ObservableCoordinateBox;
-    typedef std::shared_ptr<rx::BehaviorSubject<XCoordinate>> SubjectXCoordinate;
-    typedef std::shared_ptr<rx::BehaviorSubject<YCoordinate>> SubjectYCoordinate;
-    typedef std::shared_ptr<rx::BehaviorSubject<XExtent>> SubjectXExtent;
-    typedef std::shared_ptr<rx::BehaviorSubject<YExtent>> SubjectYExtent;
-    typedef std::shared_ptr<rx::BehaviorSubject<Point>> SubjectPoint;
-    typedef std::shared_ptr<rx::BehaviorSubject<Extent>> SubjectExtent;
-
-    window_size(HWND parent, HWND window, typename Message::Subject messages) : parent(parent), window(window), messages(rxcpp::observable(messages)), subscribed(0) {
-        initSubjects();
-        updateSubjects();
-    }
-
-    ObservablePoint origin() {
-        return create(subjectOrigin);}
-    ObservableExtent extent() {
-        return create(subjectExtent);}
-
-    ObservableXCoordinate left() {
-        return create(subjectLeft);}
-    ObservableYCoordinate top() {
-        return create(subjectTop);}
-    ObservableXCoordinate right() {
-        return create(subjectRight);}
-    ObservableYCoordinate bottom() {
-        return create(subjectBottom);}
-
-    ObservableXExtent width() {
-        return create(subjectWidth);}
-    ObservableYExtent height() {
-        return create(subjectHeight);}
-
-    ObservableXCoordinate center() {
-        return create(subjectCenter);}
-    ObservableYCoordinate middle() {
-        return create(subjectMiddle);}
-
-    measurement measure() {
-        RECT client = {};
-        if (!parent) {
-            GetClientRect(window, &client);
-        }
-        else {
-            GetWindowRect(window, &client);
-            MapWindowPoints(HWND_DESKTOP, parent, (LPPOINT)&client, 2);
-        }
-        measurement m(
-            XCoordinate(client.left),
-            YCoordinate(client.top),
-            XCoordinate(client.right),
-            YCoordinate(client.bottom)
-        );
-        return m;
-    }
-
-    template<class LTag, class LObservable, class... Tag, class... Observable> 
-    std::shared_ptr<rx::Observable<measurement>> create_binding(const detail::From<LTag, LObservable>& l, const detail::From<Tag, Observable>&... f) {
-        auto keepAlive = this->shared_from_this();
-        return rx::CreateObservable<measurement>(
-            [=](const std::shared_ptr<rx::Observer<measurement>>& observer) {
-                sdBind.Dispose();
-                sdBind.Set(rx::from(l.t)
-                    .zip(f.t...)
-                    .subscribe(rxcpp::MakeTupleDispatch(
-                        [=](typename rx::observable_item<LObservable>::type lv, typename rx::observable_item<Observable>::type... fv) {
-                            setposition<LTag, Tag...>(keepAlive, observer, lv, fv...);
-                    })));
-                return sdBind;
-        });
-    }
-
-private:
-    void initSubjects() {
-        subjectOrigin = rx::CreateBehaviorSubject<Point>(Point());
-        subjectExtent = rx::CreateBehaviorSubject<Extent>(Extent());
-        subjectLeft = rx::CreateBehaviorSubject<XCoordinate>(XCoordinate());
-        subjectTop = rx::CreateBehaviorSubject<YCoordinate>(YCoordinate());
-        subjectRight = rx::CreateBehaviorSubject<XCoordinate>(XCoordinate());
-        subjectBottom = rx::CreateBehaviorSubject<YCoordinate>(YCoordinate());
-        subjectWidth = rx::CreateBehaviorSubject<XExtent>(XExtent());
-        subjectHeight = rx::CreateBehaviorSubject<YExtent>(YExtent());
-        subjectCenter = rx::CreateBehaviorSubject<XCoordinate>(XCoordinate());
-        subjectMiddle = rx::CreateBehaviorSubject<YCoordinate>(YCoordinate());
-    }
-    template<class... Tag, class KeepAlive, class Observer, class... Value> 
-    static void setposition(const KeepAlive& keepAlive, const Observer& observer, const Value&... fv) {
-        auto m = keepAlive->measure();
-        fixed state;
-        bool sets[] = {(setter<Tag>::set(state, m, fv), true)...};
-        observer->OnNext(m);
-    }
-    struct fixed {
-        fixed() 
-            : left(false)
-            , top(false)
-            , right(false)
-            , bottom(false)
-            , width(false)
-            , height(false)
-            , center(false)
-            , middle(false)
-        {}
-        bool left;
-        bool top;
-        bool right;
-        bool bottom;
-        bool width;
-        bool height;
-        bool center;
-        bool middle;
-        bool leftFixed() {return left || (int(right) + width + center) > 1;}
-        bool topFixed() {return top || (int(bottom) + height + middle) > 1;}
-        bool rightFixed() {return right || (int(left) + width + center) > 1;}
-        bool bottomFixed() {return bottom || (int(top) + height + middle) > 1;}
-        bool widthFixed() {return width || (int(left) + right + center) > 1;}
-        bool heightFixed() {return height || (int(top) + bottom + middle) > 1;}
-        bool centerFixed() {return center || (int(left) + right + width) > 1;}
-        bool middleFixed() {return middle || (int(top) + bottom + height) > 1;}
-    };
-    void updateSubjects() {
-        auto m = measure();
-        subjectOrigin->OnNext(m.origin());
-        subjectExtent->OnNext(m.extent());
-        subjectLeft->OnNext(m.left);
-        subjectTop->OnNext(m.top);
-        subjectRight->OnNext(m.right);
-        subjectBottom->OnNext(m.bottom);
-        subjectWidth->OnNext(m.width());
-        subjectHeight->OnNext(m.height());
-        subjectCenter->OnNext(m.center());
-        subjectMiddle->OnNext(m.middle());
-    }
-    template<class Subject>
-    typename rx::subject_observable<Subject>::type create(const Subject& subject) {
-        auto keepAlive = this->shared_from_this();
-        return rx::CreateObservable<typename rx::subject_item<Subject>::type>(
-            [keepAlive, this, subject](const typename rx::subject_observer<Subject>::type& observer) {
-                if (++subscribed == 1) {
-                    sdMessages.Dispose();
-                    sdMessages.Set(rx::from(messages)
-                        .where(messageId<WM_WINDOWPOSCHANGED>())
-                        .select([](const Message& m){
-                            // expands to:
-                            // return HANDLE_WM_WINDOWPOSCHANGED(m.window, m.wParam, m.lParam, rxmsg::HandleMessage(m));
-                            return RXCPP_HANDLE_MESSAGE(WM_WINDOWPOSCHANGED, m);})
-                        .subscribe(
-                        // on next
-                            rxcpp::MakeTupleDispatch([keepAlive](const LPWINDOWPOS pos, const Message&){
-                                keepAlive->updateSubjects();}),
-                        // on completed
-                            [keepAlive](){
-                                keepAlive->subjectOrigin->OnCompleted();
-                                keepAlive->subjectExtent->OnCompleted();
-                                keepAlive->subjectLeft->OnCompleted();
-                                keepAlive->subjectRight->OnCompleted();
-                                keepAlive->subjectTop->OnCompleted();
-                                keepAlive->subjectBottom->OnCompleted();
-                                keepAlive->subjectWidth->OnCompleted();
-                                keepAlive->subjectHeight->OnCompleted();
-                                keepAlive->subjectCenter->OnCompleted();
-                                keepAlive->subjectMiddle->OnCompleted();}, 
-                        // on error
-                            [keepAlive](const std::exception_ptr& e){
-                                keepAlive->subjectOrigin->OnError(e);
-                                keepAlive->subjectExtent->OnError(e);
-                                keepAlive->subjectLeft->OnError(e);
-                                keepAlive->subjectRight->OnError(e);
-                                keepAlive->subjectTop->OnError(e);
-                                keepAlive->subjectBottom->OnError(e);
-                                keepAlive->subjectWidth->OnError(e);
-                                keepAlive->subjectHeight->OnError(e);
-                                keepAlive->subjectCenter->OnError(e);
-                                keepAlive->subjectMiddle->OnError(e);
-                        }));
-                }
-                rx::ComposableDisposable cd;
-                cd.Add(rx::Disposable([keepAlive](){
-                    if(--keepAlive->subscribed == 0){
-                        keepAlive->sdMessages.Dispose();}}));
-                cd.Add(subject->Subscribe(observer));
-                return cd;
-            });
-    }
-
-    template<class Tag>
-    struct setter;
-
-    template<>
-    struct setter<detail::LeftFrom> {
-        static void set(fixed& f, measurement& m, XCoordinate x) {
-            if (f.leftFixed()) {
-                throw std::logic_error("already bound left.");}
-            f.left = true;
-            if (f.right) {m.left = x;}
-            else if (f.center) {auto delta = m.center() - x; m.left = x; m.right = x + (delta*2);}
-            else {m.right = x + m.width(); m.left = x;}
-        }
-    };
-    template<>
-    struct setter<detail::TopFrom> {
-        static void set(fixed& f, measurement& m, YCoordinate y) {
-            if (f.topFixed()) {
-                throw std::logic_error("already bound top.");}
-            f.top = true;
-            if (f.bottom) {m.top = y;}
-            else if (f.middle) {auto delta = m.middle() - y; m.top = y; m.bottom = y + (delta*2);}
-            else {m.bottom = y + m.height(); m.top = y;}
-        }
-    };
-    template<>
-    struct setter<detail::RightFrom> {
-        static void set(fixed& f, measurement& m, XCoordinate x) {
-            if (f.rightFixed()) {
-                throw std::logic_error("already bound right.");}
-            f.right = true;
-            if (f.left) {m.right = x;}
-            else if (f.center) {auto delta = x - m.center(); m.right = x; m.left = x - (delta*2);}
-            else {m.left = x - m.width(); m.right = x;}
-        }
-    };
-    template<>
-    struct setter<detail::BottomFrom> {
-        static void set(fixed& f, measurement& m, YCoordinate y) {
-            if (f.bottomFixed()) {
-                throw std::logic_error("already bound bottom.");}
-            f.bottom = true;
-            if (f.top) {m.bottom = y;}
-            else if (f.middle) {auto delta = y - m.middle(); m.bottom = y; m.top = y - (delta*2);}
-            else {m.top = y - m.height(); m.bottom = y;}
-        }
-    };
-    template<>
-    struct setter<detail::WidthFrom> {
-        static void set(fixed& f, measurement& m, XExtent cx) {
-            if (f.widthFixed()) {
-                throw std::logic_error("already bound width.");}
-            f.width = true;
-            if (f.left) {
-                m.right = m.left + cx;}
-            else if (f.right) {
-                m.left = m.right - cx;}
-            else { // act as if center is fixed even if it isn't
-                auto delta = (m.width().c - cx.c) / 2; m.left += delta; m.right = m.left + cx;}
-        }
-    };
-    template<>
-    struct setter<detail::HeightFrom> {
-        static void set(fixed& f, measurement& m, YExtent cy) {
-            if (f.heightFixed()) {
-                throw std::logic_error("already bound height.");}
-            f.height = true;
-            if (f.top) {
-                m.bottom = m.top + cy;}
-            else if (f.bottom) {
-                m.top = m.bottom - cy;}
-            else { // act as if middle is fixed even if it isn't
-                auto delta = (m.height().c - cy.c) / 2; m.top += delta; m.bottom = m.top + cx;}
-        }
-    };
-    template<>
-    struct setter<detail::CenterFrom> {
-        static void set(fixed& f, measurement& m, XCoordinate x) {
-            if (f.centerFixed()) {
-                throw std::logic_error("already bound center.");}
-            f.center = true;
-            if (f.left) {
-                m.right = x + (x - m.left);}
-            else if (f.right) {
-                m.left = x - (m.right - x);}
-            else { // act as if width is fixed even if it isn't
-                auto w = m.width(); auto delta = w / 2; m.left = x - delta; m.right = m.left + w;}
-        }
-    };
-    template<>
-    struct setter<detail::MiddleFrom> {
-        static void set(fixed& f, measurement& m, YCoordinate y) {
-            if (f.middleFixed()) {
-                throw std::logic_error("already bound middle.");}
-            f.middle = true;
-            if (f.top) {
-                m.bottom = y + (y - m.top);}
-            else if (f.bottom) {
-                m.top = y - (m.bottom - y);}
-            else { // act as if height is fixed even if it isn't
-                auto h = m.height(); auto delta = h / 2; m.top = y - delta; m.bottom = m.top + h;}
-        }
-    };
-    template<>
-    struct setter<detail::OriginFrom> {
-        static void set(fixed& f, measurement& m, Point p) {
-            set(f, m, XCoordinate(p.p.x), detail::LeftFrom());
-            set(f, m, YCoordinate(p.p.y), detail::TopFrom());}
-    };
-    template<>
-    struct setter<detail::ExtentFrom> {
-        static void set(fixed& f, measurement& m, Extent p) {
-        set(f, m, XExtent(e.e.cx), detail::WidthFrom());
-        set(f, m, YExtent(e.e.cy), detail::HeightFrom());}
-    };
-
-    typename Message::Observable messages;
-    HWND parent;
-    HWND window;
-    std::atomic<int> subscribed;
-    rx::SharedDisposable sdMessages;
-    rx::SharedDisposable sdBind;
-    SubjectPoint subjectOrigin;
-    SubjectExtent subjectExtent;
-    SubjectXCoordinate subjectLeft;
-    SubjectYCoordinate subjectTop;
-    SubjectXCoordinate subjectRight;
-    SubjectYCoordinate subjectBottom;
-    SubjectXExtent subjectWidth;
-    SubjectYExtent subjectHeight;
-    SubjectXCoordinate subjectCenter;
-    SubjectYCoordinate subjectMiddle;
-};
-
-namespace detail {
-    struct FromLeft {};
-    struct FromTop {};
-    struct FromRight {};
-    struct FromBottom {};
-    struct FromWidth {};
-    struct FromHeight {};
-
-    template<class FromTag>
-    struct MeasureFrom;
-
-    template<>
-    struct MeasureFrom<detail::FromLeft> {
-        template<class Tag, class Operation>
-        static auto measureFrom(const Measurement<Tag>& m, Operation o) 
-            -> decltype(m.left) {
-            return m.left + o(m.width());
-        }
-    };
-    template<>
-    struct MeasureFrom<detail::FromTop> {
-        template<class Tag, class Operation>
-        static auto measureFrom(const Measurement<Tag>& m, Operation o) 
-            -> decltype(m.top) {
-            return m.top + o(m.height());
-        }
-    };
-    template<>
-    struct MeasureFrom<detail::FromRight> {
-        template<class Tag, class Operation>
-        static auto measureFrom(const Measurement<Tag>& m, Operation o) 
-            -> decltype(m.right) {
-            return m.right - o(m.width());
-        }
-    };
-    template<>
-    struct MeasureFrom<detail::FromBottom> {
-        template<class Tag, class Operation>
-        static auto measureFrom(const Measurement<Tag>& m, Operation o) 
-            -> decltype(m.bottom) {
-            return m.bottom - o(m.height());
-        }
-    };
-    template<class Tag, class... FromTag, class... T> 
-    auto measureFrom(const Measurement<Tag>& m, const From<FromTag, T>&... ft)
-        -> decltype(std::make_tuple(MeasureFrom<FromTag>::measureFrom(m, ft.t)...)) {
-        return      std::make_tuple(MeasureFrom<FromTag>::measureFrom(m, ft.t)...);
-    }
 
     template<class Tag>
     struct operators {
         typedef Tag tag;
-        typedef decltype(rx_window_traits(tag())) traits;
+        typedef decltype(rx_measurement_traits(tag())) traits;
         typedef typename traits::Message Message;
-        typedef typename traits::XCoordinate XCoordinate;
-        typedef typename traits::YCoordinate YCoordinate;
+        typedef typename traits::XPoint XPoint;
+        typedef typename traits::YPoint YPoint;
         typedef typename traits::XExtent XExtent;
         typedef typename traits::YExtent YExtent;
         typedef typename traits::Point Point;
         typedef typename traits::Extent Extent;
         typedef typename traits::Rect Rect;
-        typedef Measurement<tag> measurement;
-
-        template<class... FromTag, class... T>
-        static auto SelectFromMeasurement(
-            const std::shared_ptr<rx::Observable<Measurement<Tag>>>& source, 
-            const From<FromTag, T>&... from) 
-            -> std::shared_ptr<rx::Observable<
-                    decltype(measureFrom(Measurement<Tag>(), from...))>> {
-            typedef decltype(measureFrom(Measurement<Tag>(), from...)) U;
-            return rx::CreateObservable<U>(
-                [=](const std::shared_ptr<rx::Observer<U>>& observer) {
-                    return rx::from(source)
-                        .subscribe(
-                        // on next
-                            [=](Measurement<Tag> m){
-                                observer->OnNext(measureFrom<Tag>(m, from...));
-                            },
-                        // on completed
-                            [=](){
-                                observer->OnCompleted();
-                            }, 
-                        // on error
-                            [=](const std::exception_ptr& e){
-                                observer->OnError(e);
-                        });
-                });
-        }
+        typedef typename traits::Measurement Measurement;
 
         template<class Message>
         static auto SelectClientMeasurement(const std::shared_ptr<rx::Observable<Message>>& source) 
-            -> std::shared_ptr<rx::Observable<Measurement<Tag>>> {
-            return rx::CreateObservable<Measurement<Tag>>(
-                [=](const std::shared_ptr<rx::Observer<Measurement<Tag>>>& observer) {
+            -> std::shared_ptr<rx::Observable<Measurement>> {
+            return rx::CreateObservable<Measurement>(
+                [=](const std::shared_ptr<rx::Observer<Measurement>>& observer) {
                     return rx::from(source)
                         .where(messageId<WM_WINDOWPOSCHANGED>())
                         .select([](const Message& msg){
@@ -855,11 +341,11 @@ namespace detail {
                             rxcpp::MakeTupleDispatch([=](const LPWINDOWPOS pos, const Message& msg){
                                 RECT client = {};
                                 GetClientRect(msg.window, &client);
-                                Measurement<Tag> m(
-                                    XCoordinate(client.left),
-                                    YCoordinate(client.top),
-                                    XCoordinate(client.right),
-                                    YCoordinate(client.bottom)
+                                Measurement m(
+                                    XPoint(client.left),
+                                    YPoint(client.top),
+                                    XPoint(client.right),
+                                    YPoint(client.bottom)
                                 );
                                 observer->OnNext(m);
                             }),
@@ -876,9 +362,9 @@ namespace detail {
 
         template<class Message>
         static auto SelectScreenMeasurement(const std::shared_ptr<rx::Observable<Message>>& source) 
-            -> std::shared_ptr<rx::Observable<Measurement<Tag>>> {
-            return rx::CreateObservable<Measurement<Tag>>(
-                [=](const std::shared_ptr<rx::Observer<Measurement<Tag>>>& observer) {
+            -> std::shared_ptr<rx::Observable<Measurement>> {
+            return rx::CreateObservable<Measurement>(
+                [=](const std::shared_ptr<rx::Observer<Measurement>>& observer) {
                     return rx::from(source)
                         .where(messageId<WM_WINDOWPOSCHANGED>())
                         .select([](const Message& msg){
@@ -890,11 +376,11 @@ namespace detail {
                             rxcpp::MakeTupleDispatch([=](const LPWINDOWPOS pos, const Message& msg){
                                 RECT screen = {};
                                 GetWindowRect(msg.window, &screen);
-                                Measurement<Tag> m(
-                                    XCoordinate(screen.left),
-                                    YCoordinate(screen.top),
-                                    XCoordinate(screen.right),
-                                    YCoordinate(screen.bottom)
+                                Measurement m(
+                                    XPoint(screen.left),
+                                    YPoint(screen.top),
+                                    XPoint(screen.right),
+                                    YPoint(screen.bottom)
                                 );
                                 observer->OnNext(m);
                             }),
@@ -911,9 +397,9 @@ namespace detail {
 
         template<class Message>
         static auto SelectParentMeasurement(const std::shared_ptr<rx::Observable<Message>>& source) 
-            -> std::shared_ptr<rx::Observable<Measurement<Tag>>> {
-            return rx::CreateObservable<Measurement<Tag>>(
-                [=](const std::shared_ptr<rx::Observer<Measurement<Tag>>>& observer) {
+            -> std::shared_ptr<rx::Observable<Measurement>> {
+            return rx::CreateObservable<Measurement>(
+                [=](const std::shared_ptr<rx::Observer<Measurement>>& observer) {
                     return rx::from(source)
                         .where(messageId<WM_WINDOWPOSCHANGED>())
                         .select([](const Message& msg){
@@ -930,11 +416,11 @@ namespace detail {
                                 if (parent != HWND_DESKTOP) {
                                     MapWindowPoints(HWND_DESKTOP, parent, (LPPOINT)&mapped, 2);
                                 }
-                                Measurement<Tag> m(
-                                    XCoordinate(mapped.left),
-                                    YCoordinate(mapped.top),
-                                    XCoordinate(mapped.right),
-                                    YCoordinate(mapped.bottom)
+                                Measurement m(
+                                    XPoint(mapped.left),
+                                    YPoint(mapped.top),
+                                    XPoint(mapped.right),
+                                    YPoint(mapped.bottom)
                                 );
                                 observer->OnNext(m);
                             }),
@@ -951,19 +437,6 @@ namespace detail {
 
     };
 
-    struct scale {
-        float factor;
-        scale(float f) : factor(f) {}
-        template<class T>
-        T operator()(T t) {return t * f;}
-    };
-
-    template<class T>
-    struct set {
-        T t;
-        set(T targ) : t(targ) {}
-        T operator()(T) {return t;}
-    };
 }
 
 template<class Tag>
@@ -991,152 +464,84 @@ auto rxcpp_chain(select_parent_measurement<Tag>&&, const std::shared_ptr<rx::Obs
 }
 
 template<class Tag>
-struct select_from_measurement {};
-template<class Tag, class... FromTag, class... T>
-auto rxcpp_chain(select_from_measurement<Tag>&&, const std::shared_ptr<rx::Observable<Measurement<Tag>>>& source, const detail::From<FromTag, T>&... from) 
-    -> decltype(detail::operators<Tag>::SelectFromMeasurement(source, from...)) {
-    return      detail::operators<Tag>::SelectFromMeasurement(source, from...);
-}
-
-
-template<class Tag>
 struct window_measure {
     typedef Tag tag;
-    typedef decltype(rx_window_traits(tag())) traits;
-    typedef typename traits::Message Message;
-    typedef typename traits::XCoordinate XCoordinate;
-    typedef typename traits::YCoordinate YCoordinate;
+    typedef decltype(rx_measurement_traits(tag())) traits;
+    typedef typename traits::XPoint XPoint;
+    typedef typename traits::YPoint YPoint;
     typedef typename traits::XExtent XExtent;
     typedef typename traits::YExtent YExtent;
     typedef typename traits::Point Point;
     typedef typename traits::Extent Extent;
     typedef typename traits::Rect Rect;
-    typedef Measurement<tag> measurement;
+    typedef typename traits::Measurement Measurement;
+
     typedef select_client_measurement<Tag> select_client_measurement;
     typedef select_screen_measurement<Tag> select_screen_measurement;
     typedef select_parent_measurement<Tag> select_parent_measurement;
-    typedef select_from_measurement<Tag> select_from_measurement;
-
-
-    static XExtent zeroXExtent(XExtent) {return XExtent(0);} 
-    static YExtent zeroYExtent(YExtent) {return YExtent(0);}
-
-#if 1
-    static auto fromLeft() 
-        ->     decltype(detail::make_from<detail::FromLeft>(zeroXExtent)) {
-        return          detail::make_from<detail::FromLeft>(zeroXExtent);}
-    static auto fromLeft(float factor) 
-        ->     decltype(detail::make_from<detail::FromLeft>(detail::scale(factor))) {
-        return          detail::make_from<detail::FromLeft>(detail::scale(factor));}
-    static auto fromTop() 
-        ->     decltype(detail::make_from<detail::FromTop>(zeroYExtent)) {
-        return          detail::make_from<detail::FromTop>(zeroYExtent);}
-    static auto fromTop(float factor) 
-        ->     decltype(detail::make_from<detail::FromTop>(detail::scale(factor))) {
-        return          detail::make_from<detail::FromTop>(detail::scale(factor));}
-    static auto fromRight() 
-        ->     decltype(detail::make_from<detail::FromRight>(zeroXExtent)) {
-        return          detail::make_from<detail::FromRight>(zeroXExtent);}
-    static auto fromRight(float factor) 
-        ->     decltype(detail::make_from<detail::FromRight>(detail::scale(factor))) {
-        return          detail::make_from<detail::FromRight>(detail::scale(factor));}
-    static auto fromBottom() 
-        ->     decltype(detail::make_from<detail::FromBottom>(zeroYExtent)) {
-        return          detail::make_from<detail::FromBottom>(zeroYExtent);}
-    static auto fromBottom(float factor) 
-        ->     decltype(detail::make_from<detail::FromBottom>(detail::scale(factor))) {
-        return          detail::make_from<detail::FromBottom>(detail::scale(factor));}
-    static auto fromWidth() 
-        ->     decltype(detail::make_from<detail::FromWidth>(zeroXExtent)) {
-        return          detail::make_from<detail::FromWidth>(zeroXExtent);}
-    static auto fromWidth(float factor) 
-        ->     decltype(detail::make_from<detail::FromWidth>(detail::scale(factor))) {
-        return          detail::make_from<detail::FromWidth>(detail::scale(factor));}
-    static auto fromHeight(YExtent value)
-        ->     decltype(detail::make_from<detail::FromHeight>(detail::set<YExtent>(value))) {
-        return          detail::make_from<detail::FromHeight>(detail::set<YExtent>(value));}
-#else
-    static auto fromLeft() 
-        ->     decltype(detail::make_from<detail::FromLeft>(zeroXExtent)) {
-        return          detail::make_from<detail::FromLeft>(zeroXExtent);}
-    static auto fromLeft(float factor) 
-        ->     decltype(detail::make_from<detail::FromLeft>(detail::scale(factor))) {
-        return          detail::make_from<detail::FromLeft>(detail::scale(factor));}
-    static auto fromLeft(XExtent value)
-        ->     decltype(detail::make_from<detail::FromLeft>(detail::set<XExtent>(value))) {
-        return          detail::make_from<detail::FromLeft>(detail::set<XExtent>(value));}
-    static auto fromTop() 
-        ->     decltype(detail::make_from<detail::FromTop>(zeroYExtent)) {
-        return          detail::make_from<detail::FromTop>(zeroYExtent);}
-    static auto fromTop(float factor) 
-        ->     decltype(detail::make_from<detail::FromTop>(detail::scale(factor))) {
-        return          detail::make_from<detail::FromTop>(detail::scale(factor));}
-    static auto fromTop(YExtent value)
-        ->     decltype(detail::make_from<detail::FromRight>(detail::set<YExtent>(value))) {
-        return          detail::make_from<detail::FromRight>(detail::set<YExtent>(value));}
-    static auto fromRight() 
-        ->     decltype(detail::make_from<detail::FromRight>(zeroXExtent)) {
-        return          detail::make_from<detail::FromRight>(zeroXExtent);}
-    static auto fromRight(float factor) 
-        ->     decltype(detail::make_from<detail::FromRight>(detail::scale(factor))) {
-        return          detail::make_from<detail::FromRight>(detail::scale(factor));}
-    static auto fromRight(XExtent value)
-        ->     decltype(detail::make_from<detail::FromRight>(detail::set<XExtent>(value))) {
-        return          detail::make_from<detail::FromRight>(detail::set<XExtent>(value));}
-    static auto fromBottom() 
-        ->     decltype(detail::make_from<detail::FromBottom>(zeroYExtent)) {
-        return          detail::make_from<detail::FromBottom>(zeroYExtent);}
-    static auto fromBottom(float factor) 
-        ->     decltype(detail::make_from<detail::FromBottom>(detail::scale(factor))) {
-        return          detail::make_from<detail::FromBottom>(detail::scale(factor));}
-    static auto fromBottom(YExtent value)
-        ->     decltype(detail::make_from<detail::FromBottom>(detail::set<YExtent>(value))) {
-        return          detail::make_from<detail::FromBottom>(detail::set<YExtent>(value));}
-    static auto fromWidth() 
-        ->     decltype(detail::make_from<detail::FromWidth>(zeroXExtent)) {
-        return          detail::make_from<detail::FromWidth>(zeroXExtent);}
-    static auto fromWidth(float factor) 
-        ->     decltype(detail::make_from<detail::FromWidth>(detail::scale(factor))) {
-        return          detail::make_from<detail::FromWidth>(detail::scale(factor));}
-    static auto fromWidth(XExtent value)
-        ->     decltype(detail::make_from<detail::FromWidth>(detail::set<XExtent>(value))) {
-        return          detail::make_from<detail::FromWidth>(detail::set<XExtent>(value));}
-    static auto fromHeight() 
-        ->     decltype(detail::make_from<detail::FromHeight>(zeroYExtent)) {
-        return          detail::make_from<detail::FromHeight>(zeroYExtent);}
-    static auto fromHeight(float factor) 
-        ->     decltype(detail::make_from<detail::FromHeight>(detail::scale(factor))) {
-        return          detail::make_from<detail::FromHeight>(detail::scale(factor));}
-    static auto fromHeight(YExtent value)
-        ->     decltype(detail::make_from<detail::FromHeight>(detail::set<YExtent>(value))) {
-        return          detail::make_from<detail::FromHeight>(detail::set<YExtent>(value));}
-#endif
 };
 
 template<class Tag>
-class stack {
-public:
-private:
-    std::vector<std::shared_ptr<window_size<Tag>>> stacked;
+struct Measurement {
+    typedef Tag tag;
+    typedef decltype(rx_measurement_traits(tag())) traits;
+    typedef typename traits::XPoint XPoint;
+    typedef typename traits::YPoint YPoint;
+    typedef typename traits::XExtent XExtent;
+    typedef typename traits::YExtent YExtent;
+    typedef typename traits::Point Point;
+    typedef typename traits::Extent Extent;
+    typedef typename traits::Rect Rect;
+
+    Measurement() {}
+#if 0
+    explicit Measurement(Rect r) : 
+        left(XPoint(r.r.left)),
+        top(YPoint(r.r.top)),
+        right(XPoint(r.r.right)),
+        bottom(YPoint(r.r.bottom)) {}
+#endif
+    Measurement(
+        XPoint l, YPoint t,
+        XPoint r, YPoint b) : 
+        left(std::move(l)), top(std::move(t)),
+        right(std::move(r)), bottom(std::move(b)) {}
+    XPoint left;
+    YPoint top;
+    XPoint right;
+    YPoint bottom;
+    XExtent width() const {return right - left;}
+    YExtent height() const {return bottom - top;}
+    XExtent width(float factor) const {return (right - left) * factor;}
+    YExtent height(float factor) const {return (bottom - top) * factor;}
+    Point origin() const {return Point(left, top);}
+    Extent extent() const {return Extent(width(), height());}
+    XPoint center() const {return left + (width() / 2);}
+    YPoint middle() const {return top + (height() / 2);}
 };
+
+template<class Tag>
+bool operator==(const Measurement<Tag>& l, const Measurement<Tag>& r) {
+    return l.left == r.left && l.top == r.top && l.right == r.right && l.bottom == r.bottom;
+}
 
 }
 using rxmsg::rxcpp_chain;
 
 namespace rxmsg{namespace traits{
-    template<class XCoordinateArg>
-    struct XCoordinate {
-        XCoordinateArg c;
-        XCoordinate() {c = 0;}
-        explicit XCoordinate(XCoordinateArg carg) {c = carg;}
-        XCoordinate(const XCoordinate& carg) : c(carg.c) {}
+    template<class XPointArg>
+    struct XPoint {
+        XPointArg c;
+        XPoint() {c = 0;}
+        explicit XPoint(XPointArg carg) {c = carg;}
+        XPoint(const XPoint& carg) : c(carg.c) {}
     };
-    template<class YCoordinateArg>
-    struct YCoordinate {
-        YCoordinateArg c;
-        YCoordinate() {c = 0;}
-        explicit YCoordinate(YCoordinateArg carg) {c = carg;}
-        YCoordinate(const YCoordinate& carg) : c(carg.c) {}
+    template<class YPointArg>
+    struct YPoint {
+        YPointArg c;
+        YPoint() {c = 0;}
+        explicit YPoint(YPointArg carg) {c = carg;}
+        YPoint(const YPoint& carg) : c(carg.c) {}
     };
     template<class XExtentArg>
     struct XExtent {
@@ -1152,15 +557,17 @@ namespace rxmsg{namespace traits{
         explicit YExtent(YExtentArg carg) {c = carg;}
         YExtent(const YExtent& carg) : c(carg.c) {}
     };
-    template<class XCoordinateArg, class YCoordinateArg, class PointArg>
+    template<class XPointArg, class YPointArg, class PointArg>
     struct Point {
-        typedef XCoordinate<XCoordinateArg> XCoordinate;
-        typedef YCoordinate<YCoordinateArg> YCoordinate;
+        typedef XPoint<XPointArg> XPoint;
+        typedef YPoint<YPointArg> YPoint;
         PointArg p;
         Point() {p.x = 0; p.y = 0;}
-        Point(XCoordinate x, YCoordinate y) {p.x = x.c; p.y = y.c;}
+        Point(XPoint x, YPoint y) {p.x = x.c; p.y = y.c;}
         explicit Point(PointArg parg) {p = parg;}
         Point(const Point& p) : p(p.p) {}
+        XPoint getX() {return XPoint(p.x);}
+        YPoint getY() {return YPoint(p.y);}
     };
     template<class XExtentArg, class YExtentArg, class ExtentArg>
     struct Extent {
@@ -1171,42 +578,48 @@ namespace rxmsg{namespace traits{
         Extent(XExtent cx, YExtent cy) {e.cx = cx.c; e.cy = cy.c;}
         explicit Extent(ExtentArg earg) {e = earg;}
         Extent(const Extent& e) : e(e.e) {}
+        XExtent getCX() {return XExtent(e.cx);}
+        YExtent getCY() {return YExtent(e.cy);}
     };
-    template<class XCoordinateArg, class YCoordinateArg, class RectArg>
+    template<class XPointArg, class YPointArg, class RectArg>
     struct Rect {
-        typedef XCoordinate<XCoordinateArg> XCoordinate;
-        typedef YCoordinate<YCoordinateArg> YCoordinate;
+        typedef XPoint<XPointArg> XPoint;
+        typedef YPoint<YPointArg> YPoint;
         RectArg r;
         Rect() {r.left = 0; r.top = 0; r.right = 0; r.bottom = 0;}
-        Rect(XCoordinate l, YCoordinate t, XCoordinate r, YCoordinate b) {
+        Rect(XPoint l, YPoint t, XPoint r, YPoint b) {
             r.left = l.c; r.top = t.c; r.right = r.c; r.bottom = b.c;}
         explicit Rect(RectArg rarg) {r = rarg;}
         Rect(const Rect& p) : p(p.p) {}
+        XPoint getLeft() {return XPoint(r.left);}
+        YPoint getTop() {return YPoint(r.top);}
+        XPoint getRight() {return XPoint(r.right);}
+        YPoint getBottom() {return YPoint(r.bottom);}
     };
 
-    template<class XCoordinateArg>
-    auto operator-(XCoordinate<XCoordinateArg> r, XCoordinate<XCoordinateArg> l) -> XExtent<decltype(r.c - l.c)> {return XExtent<decltype(r.c - l.c)>(r.c - l.c);}
-    template<class XCoordinateArg>
-    bool operator<(XCoordinate<XCoordinateArg> r, XCoordinate<XCoordinateArg> l) {return r.c < l.c;}
-    template<class XCoordinateArg>
-    bool operator==(XCoordinate<XCoordinateArg> r, XCoordinate<XCoordinateArg> l) {return r.c == l.c;}
+    template<class XPointArg>
+    auto operator-(XPoint<XPointArg> r, XPoint<XPointArg> l) -> XExtent<decltype(r.c - l.c)> {return XExtent<decltype(r.c - l.c)>(r.c - l.c);}
+    template<class XPointArg>
+    bool operator<(XPoint<XPointArg> r, XPoint<XPointArg> l) {return r.c < l.c;}
+    template<class XPointArg>
+    bool operator==(XPoint<XPointArg> r, XPoint<XPointArg> l) {return r.c == l.c;}
 
-    template<class YCoordinateArg>
-    auto operator-(YCoordinate<YCoordinateArg> b, YCoordinate<YCoordinateArg> t) -> YExtent<decltype(b.c - t.c)> {return YExtent<decltype(b.c - t.c)>(b.c - t.c);}
-    template<class YCoordinateArg>
-    bool operator<(YCoordinate<YCoordinateArg> b, YCoordinate<YCoordinateArg> t) {return b.c < t.c;}
-    template<class YCoordinateArg>
-    bool operator==(YCoordinate<YCoordinateArg> b, YCoordinate<YCoordinateArg> t) {return b.c == t.c;}
+    template<class YPointArg>
+    auto operator-(YPoint<YPointArg> b, YPoint<YPointArg> t) -> YExtent<decltype(b.c - t.c)> {return YExtent<decltype(b.c - t.c)>(b.c - t.c);}
+    template<class YPointArg>
+    bool operator<(YPoint<YPointArg> b, YPoint<YPointArg> t) {return b.c < t.c;}
+    template<class YPointArg>
+    bool operator==(YPoint<YPointArg> b, YPoint<YPointArg> t) {return b.c == t.c;}
 
-    template<class XCoordinateArg, class XExtentArg>
-    auto operator-(XCoordinate<XCoordinateArg> c, XExtent<XExtentArg> e) -> XCoordinate<XCoordinateArg> {return XCoordinate<XCoordinateArg>(c.c - e.c);}
-    template<class XCoordinateArg, class XExtentArg>
-    auto operator+(XCoordinate<XCoordinateArg> c, XExtent<XExtentArg> e) -> XCoordinate<XCoordinateArg> {return XCoordinate<XCoordinateArg>(c.c + e.c);}
+    template<class XPointArg, class XExtentArg>
+    auto operator-(XPoint<XPointArg> c, XExtent<XExtentArg> e) -> XPoint<XPointArg> {return XPoint<XPointArg>(c.c - e.c);}
+    template<class XPointArg, class XExtentArg>
+    auto operator+(XPoint<XPointArg> c, XExtent<XExtentArg> e) -> XPoint<XPointArg> {return XPoint<XPointArg>(c.c + e.c);}
 
-    template<class YCoordinateArg, class YExtentArg>
-    auto operator-(YCoordinate<YCoordinateArg> c, YExtent<YExtentArg> e) -> YCoordinate<YCoordinateArg> {return YCoordinate<YCoordinateArg>(c.c - e.c);}
-    template<class YCoordinateArg, class YExtentArg>
-    auto operator+(YCoordinate<YCoordinateArg> c, YExtent<YExtentArg> e) -> YCoordinate<YCoordinateArg> {return YCoordinate<YCoordinateArg>(c.c + e.c);}
+    template<class YPointArg, class YExtentArg>
+    auto operator-(YPoint<YPointArg> c, YExtent<YExtentArg> e) -> YPoint<YPointArg> {return YPoint<YPointArg>(c.c - e.c);}
+    template<class YPointArg, class YExtentArg>
+    auto operator+(YPoint<YPointArg> c, YExtent<YExtentArg> e) -> YPoint<YPointArg> {return YPoint<YPointArg>(c.c + e.c);}
 
     template<class XExtentArg>
     bool operator<(XExtent<XExtentArg> l, XExtent<XExtentArg> r) {return l.c < r.c;}
@@ -1228,32 +641,37 @@ namespace rxmsg{namespace traits{
     template<class YExtentArg>
     auto operator*(YExtent<YExtentArg> e, YExtentArg d) -> YExtent<YExtentArg> {return YExtent<YExtentArg>(e.c*d);}
 
-    template<class XCoordinateArg, class YCoordinateArg, class XExtentArg, class YExtentArg, class PointArg, class ExtentArg, class RectArg, class MessageArg>
-    struct window_traits_builder {
-        typedef XCoordinateArg XCoordinateRaw;
-        typedef YCoordinateArg YCoordinateRaw;
+    template<class XPointArg, class YPointArg, class PointArg>
+    bool operator<(Point<XPointArg, YPointArg, PointArg> l, Point<XPointArg, YPointArg, PointArg> r) {
+        return l.p.x < r.p.x || l.p.y < r.p.y;}
+    template<class XPointArg, class YPointArg, class PointArg>
+    bool operator==(Point<XPointArg, YPointArg, PointArg> l, Point<XPointArg, YPointArg, PointArg> r) {
+        return l.p.x == r.p.x || l.p.y == r.p.y;}
+
+    template<class Tag, class XPointArg, class YPointArg, class XExtentArg, class YExtentArg, class PointArg, class ExtentArg, class RectArg>
+    struct measurement_traits_builder {
+        typedef Tag tag;
+        typedef XPointArg XPointRaw;
+        typedef YPointArg YPointRaw;
         typedef XExtentArg XExtentRaw;
         typedef YExtentArg YExtentRaw;
         typedef PointArg PointRaw;
         typedef ExtentArg ExtentRaw;
         typedef RectArg RectRaw;
-        typedef XCoordinate<XCoordinateArg> XCoordinate;
-        typedef YCoordinate<YCoordinateArg> YCoordinate;
+        typedef XPoint<XPointArg> XPoint;
+        typedef YPoint<YPointArg> YPoint;
         typedef XExtent<XExtentArg> XExtent;
         typedef YExtent<YExtentArg> YExtent;
-        typedef Point<XCoordinateArg, YCoordinateArg, PointArg> Point;
+        typedef Point<XPointArg, YPointArg, PointArg> Point;
         typedef Extent<XExtentArg, YExtentArg, ExtentArg> Extent;
-        typedef Rect<XCoordinateArg, YCoordinateArg, RectArg> Rect;
-        typedef MessageArg Message;
+        typedef Rect<XPointArg, YPointArg, RectArg> Rect;
+        typedef Measurement<tag> Measurement;
     };
 
-    struct OwnDefault {};
-    window_traits_builder<int, int, int, int, POINT, SIZE, RECT, message> rx_window_traits(OwnDefault&&);
-
-    struct SubclassDefault {};
-    window_traits_builder<int, int, int, int, POINT, SIZE, RECT, subclass_message> rx_window_traits(SubclassDefault&&);
+    struct Default {};
+    measurement_traits_builder<Default, int, int, int, int, POINT, SIZE, RECT> rx_measurement_traits(Default&&);
 }}
-using rxmsg::traits::rx_window_traits;
+using rxmsg::traits::rx_measurement_traits;
 
 #if 0
 namespace rxtheme {
@@ -1364,26 +782,24 @@ namespace RootWindow
     }
 
     struct label {
-        typedef rxmsg::window_size<rxmsg::traits::SubclassDefault> window_size;
-        typedef window_size::XCoordinate XCoordinate;
-        typedef window_size::YCoordinate YCoordinate;
-        typedef window_size::XExtent XExtent;
-        typedef window_size::YExtent YExtent;
-        typedef window_size::SubjectXCoordinate SubjectXCoordinate;
-        typedef window_size::SubjectYCoordinate SubjectYCoordinate;
+        typedef rxmsg::window_measure<rxmsg::traits::Default> label_measure;
+        typedef label_measure::XPoint XPoint;
+        typedef label_measure::YPoint YPoint;
+        typedef label_measure::XExtent XExtent;
+        typedef label_measure::YExtent YExtent;
+        typedef label_measure::Point Point;
+        typedef std::shared_ptr<rx::BehaviorSubject<Point>> SubjectPoint;
 
         label(std::wstring text, POINT p, HWND parent, HINSTANCE hInstance)
             : text(std::move(text))
             , window(CreateChildWindow(L"Static", this->text.c_str(), p, hInstance, parent))
             , messages(rx::CreateSubject<rxmsg::subclass_message>())
-            , size(std::make_shared<window_size>(parent, window.get(), messages))
             , subclass(rxmsg::set_window_subclass(window.get(), messages))
         {}
         label(label&& o) 
             : text(std::move(o.text))
             , window(std::move(o.window))
             , messages(std::move(o.messages))
-            , size(std::move(o.size))
             , subclass(std::move(o.subclass))
         {}
         label& operator=(label o) {
@@ -1391,67 +807,46 @@ namespace RootWindow
             swap(text,o.text);
             swap(window,o.window);
             swap(messages,o.messages);
-            swap(size,o.size);
             swap(subclass,o.subclass);
         }
 
         std::wstring text;
         l::wr::unique_destroy_window window;
         rxmsg::subclass_message::Subject messages;
-        std::shared_ptr<window_size> size;
         rxmsg::set_subclass_result subclass;
     };
 
     // note: no base class
     struct window
     {
-        typedef rxmsg::window_measure<rxmsg::traits::OwnDefault> top_measure;
-        typedef rxmsg::window_size<rxmsg::traits::OwnDefault> top_size;
-        typedef rxmsg::window_measure<rxmsg::traits::SubclassDefault> subclass_measure;
-        typedef rxmsg::window_size<rxmsg::traits::SubclassDefault> subclass_size;
+        typedef rxmsg::window_measure<rxmsg::traits::Default> top_measure;
         window(HWND handle, CREATESTRUCT& cs)
             : root(handle)
             , exceptions(reinterpret_cast<Exceptions*>(cs.lpCreateParams))
             , text(rx::CreateSubject<std::wstring>())
             , messages(rx::CreateSubject<rxmsg::message>())
-            , size(std::make_shared<top_size>(HWND_DESKTOP, handle, messages))
             , edit(CreateChildWindow(L"Edit", L"", POINT(), cs.hInstance, handle))
             , editMessages(rx::CreateSubject<rxmsg::subclass_message>())
-            , editSize(std::make_shared<subclass_size>(handle, edit.get(), editMessages))
             , editSubclass(rxmsg::set_window_subclass(edit.get(), editMessages))
-            , mouseX(rx::CreateBehaviorSubject<typename label::XCoordinate>(label::XCoordinate()))
-            , mouseY(rx::CreateBehaviorSubject<typename label::YCoordinate>(label::YCoordinate()))
+            , mousePoint(rx::CreateBehaviorSubject<typename top_measure::Point>(top_measure::Point()))
         {
-#if 0
-            rx::from(editSize->create_binding(
-                rxmsg::leftFrom(size->left()),
-                rxmsg::topFrom(size->top()),
-                rxmsg::rightFrom(size->right()),
-                rxmsg::bottomFrom(rx::from(size->top()).select([](label::YCoordinate y){
-                    return y + label::YExtent(30);}).publish())
-            )).subscribe([this](subclass_size::measurement m){
-                SetWindowPos(edit.get(), nullptr, m.left.c, m.top.c, m.width().c, m.height().c, SWP_NOOWNERZORDER);
-                InvalidateRect(edit.get(), nullptr, true);
-            });
-#endif
-#if 0
-            rx::from(messages)
-                .chain<top_measure::select_client_measurement>()
-                .chain<top_measure::select_from_measurement>(
-                    top_measure::fromLeft(), top_measure::fromTop(), top_measure::fromWidth(), top_measure::fromHeight(top_measure::YExtent(30)))
-                .subscribe(rx::MakeTupleDispatch(
-                    [this](top_measure::XCoordinate left, top_measure::YCoordinate top, top_measure::XExtent width, top_measure::YExtent height){
-                        SetWindowPos(edit.get(), nullptr, left.c, top.c, width.c, height.c, SWP_NOOWNERZORDER);
-                        InvalidateRect(edit.get(), nullptr, true);
-                    }));
+            auto worker = std::make_shared<rx::EventLoopScheduler>();
+            auto mainFormScheduler = std::make_shared<rx::win32::WindowScheduler>();
 
-            rx::from(editMessages)
-                .chain<subclass_measure::select_parent_measurement>()
-                .chain<subclass_measure::select_from_measurement>(top_measure::fromBottom())
-                .subscribe(rx::MakeTupleDispatch(
-                    [](subclass_measure::YCoordinate bottom){
-                    }));
-#endif
+            auto rootMeasurement = rx::from(messages)
+                .chain<top_measure::select_client_measurement>();
+
+            rx::from(rootMeasurement)
+                .distinct_until_changed()
+                // delay on worker thread
+                .delay(std::chrono::milliseconds(100), worker)
+                .observe_on(mainFormScheduler)
+                .subscribe(
+                    [this](top_measure::Measurement m){
+                        SetWindowPos(edit.get(), nullptr, m.left.c, m.top.c, m.width().c, 30, SWP_NOOWNERZORDER);
+                        InvalidateRect(edit.get(), nullptr, true);
+                    });
+
             auto commands = rx::from(messages)
                 .where(rxmsg::messageId<WM_COMMAND>())
                 .select([this](const rxmsg::message& m){
@@ -1541,9 +936,6 @@ namespace RootWindow
                     set_lResult(m,TRUE);
                 });
 
-            auto worker = std::make_shared<rx::EventLoopScheduler>();
-            auto mainFormScheduler = std::make_shared<rx::win32::WindowScheduler>();
-
             auto mouseDown = rx::from(messages)
                 .where(rxmsg::messageId<WM_LBUTTONDOWN>())
                 .publish();
@@ -1570,7 +962,7 @@ namespace RootWindow
                         .distinct_until_changed()
                         .publish();})
                 .subscribe(rxcpp::MakeTupleDispatch([=](int x, int y, UINT, const rxmsg::message&) {
-                    mouseX->OnNext(label::XCoordinate(x)); mouseY->OnNext(label::YCoordinate(y));}));
+                    POINT p = {x, y}; mousePoint->OnNext(top_measure::Point(p));}));
 
             rx::from(text)
                 .subscribe(
@@ -1581,29 +973,29 @@ namespace RootWindow
                         cd.Dispose();
                         labels.clear();
 
-                        auto left = rxcpp::observable(mouseX);
-                        auto middle = rxcpp::observable(mouseY);
+                        auto point = rx::from(mousePoint)
+                            // make the text appear above the mouse location
+                            .select([](top_measure::Point p){p.p.y -= 30; return p;});
 
                         for (int i = 0; msg[i]; ++i)
                         {
                             POINT loc = {20 * i, 30};
                             auto& charlabel = CreateLabelFromLetter(msg[i], loc, cs.hInstance, handle);
 
-                            cd.Add(rx::from(charlabel.size->create_binding(
-                                    rxmsg::middleFrom(rx::from(middle).select([&charlabel](label::YCoordinate y) -> label::YCoordinate {
-                                        return std::max(label::YCoordinate(30 + 15), y);}).publish()), 
-                                    rxmsg::leftFrom(left)))
+                            rx::from(point)
                                 .distinct_until_changed()
                                 // delay on worker thread
                                 .delay(std::chrono::milliseconds(100), worker)
                                 .observe_on(mainFormScheduler)
-                                .subscribe([&charlabel](subclass_size::measurement m){
-                                    SetWindowPos(charlabel.window.get(), nullptr, m.left.c, m.top.c, m.width().c, m.height().c, SWP_NOOWNERZORDER);
+                                .subscribe([&charlabel](top_measure::Point p){
+                                    SetWindowPos(charlabel.window.get(), nullptr, p.p.x, p.p.y, 20, 30, SWP_NOOWNERZORDER);
                                     InvalidateRect(charlabel.window.get(), nullptr, true);
-                                }));
+                                });
 
-                            left = charlabel.size->right();
-                            middle = charlabel.size->middle();
+                            point = rx::from(charlabel.messages)
+                                .chain<top_measure::select_parent_measurement>()
+                                // put the next char at the right - top of this char
+                                .select([](top_measure::Measurement m){return top_measure::Point(m.right, m.top);});
                         }
                     },
                 // on completed
@@ -1638,15 +1030,12 @@ namespace RootWindow
         Exceptions* exceptions;
         std::shared_ptr<rx::Subject<std::wstring>> text;
         rxmsg::message::Subject messages;
-        std::shared_ptr<rxmsg::window_size<rxmsg::traits::OwnDefault>> size;
         l::wr::unique_destroy_window edit;
         rxmsg::subclass_message::Subject editMessages;
-        std::shared_ptr<rxmsg::window_size<rxmsg::traits::SubclassDefault>> editSize;
         rxmsg::set_subclass_result editSubclass;
         rx::ComposableDisposable cd;
         std::list<label> labels;
-        label::SubjectXCoordinate mouseX;
-        label::SubjectYCoordinate mouseY;
+        label::SubjectPoint mousePoint;
     };
 }
 
