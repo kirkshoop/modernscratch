@@ -12,11 +12,13 @@
 #include <shlwapi.h>
 #include <shlobj.h>
 #include <shellapi.h>
+#include <Uxtheme.h>
 #include <vsstyle.h>
 
 #pragma comment(lib, "gdi32.lib")
 #pragma comment(lib, "Comctl32.lib")
 #pragma comment(lib, "Ole32.lib")
+#pragma comment(lib, "uxtheme.lib")
 
 #pragma comment(linker,"\"/manifestdependency:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
@@ -598,48 +600,66 @@ namespace rxmsg{namespace traits{
     };
 
     template<class XPointArg>
-    auto operator-(XPoint<XPointArg> r, XPoint<XPointArg> l) -> XExtent<decltype(r.c - l.c)> {return XExtent<decltype(r.c - l.c)>(r.c - l.c);}
+    auto operator-(XPoint<XPointArg> r, XPoint<XPointArg> l) -> XExtent<decltype(r.c - l.c)> {
+        return XExtent<decltype(r.c - l.c)>(r.c - l.c);}
     template<class XPointArg>
-    bool operator<(XPoint<XPointArg> r, XPoint<XPointArg> l) {return r.c < l.c;}
+    bool operator<(XPoint<XPointArg> r, XPoint<XPointArg> l) {
+        return r.c < l.c;}
     template<class XPointArg>
-    bool operator==(XPoint<XPointArg> r, XPoint<XPointArg> l) {return r.c == l.c;}
+    bool operator==(XPoint<XPointArg> r, XPoint<XPointArg> l) {
+        return r.c == l.c;}
 
     template<class YPointArg>
-    auto operator-(YPoint<YPointArg> b, YPoint<YPointArg> t) -> YExtent<decltype(b.c - t.c)> {return YExtent<decltype(b.c - t.c)>(b.c - t.c);}
+    auto operator-(YPoint<YPointArg> b, YPoint<YPointArg> t) -> YExtent<decltype(b.c - t.c)> {
+        return YExtent<decltype(b.c - t.c)>(b.c - t.c);}
     template<class YPointArg>
-    bool operator<(YPoint<YPointArg> b, YPoint<YPointArg> t) {return b.c < t.c;}
+    bool operator<(YPoint<YPointArg> b, YPoint<YPointArg> t) {
+        return b.c < t.c;}
     template<class YPointArg>
-    bool operator==(YPoint<YPointArg> b, YPoint<YPointArg> t) {return b.c == t.c;}
+    bool operator==(YPoint<YPointArg> b, YPoint<YPointArg> t) {
+        return b.c == t.c;}
 
     template<class XPointArg, class XExtentArg>
-    auto operator-(XPoint<XPointArg> c, XExtent<XExtentArg> e) -> XPoint<XPointArg> {return XPoint<XPointArg>(c.c - e.c);}
+    auto operator-(XPoint<XPointArg> c, XExtent<XExtentArg> e) -> XPoint<XPointArg> {
+        return XPoint<XPointArg>(c.c - e.c);}
     template<class XPointArg, class XExtentArg>
-    auto operator+(XPoint<XPointArg> c, XExtent<XExtentArg> e) -> XPoint<XPointArg> {return XPoint<XPointArg>(c.c + e.c);}
+    auto operator+(XPoint<XPointArg> c, XExtent<XExtentArg> e) -> XPoint<XPointArg> {
+        return XPoint<XPointArg>(c.c + e.c);}
 
     template<class YPointArg, class YExtentArg>
-    auto operator-(YPoint<YPointArg> c, YExtent<YExtentArg> e) -> YPoint<YPointArg> {return YPoint<YPointArg>(c.c - e.c);}
+    auto operator-(YPoint<YPointArg> c, YExtent<YExtentArg> e) -> YPoint<YPointArg> {
+        return YPoint<YPointArg>(c.c - e.c);}
     template<class YPointArg, class YExtentArg>
-    auto operator+(YPoint<YPointArg> c, YExtent<YExtentArg> e) -> YPoint<YPointArg> {return YPoint<YPointArg>(c.c + e.c);}
+    auto operator+(YPoint<YPointArg> c, YExtent<YExtentArg> e) -> YPoint<YPointArg> {
+        return YPoint<YPointArg>(c.c + e.c);}
 
     template<class XExtentArg>
-    bool operator<(XExtent<XExtentArg> l, XExtent<XExtentArg> r) {return l.c < r.c;}
+    bool operator<(XExtent<XExtentArg> l, XExtent<XExtentArg> r) {
+        return l.c < r.c;}
     template<class XExtentArg>
-    bool operator==(XExtent<XExtentArg> l, XExtent<XExtentArg> r) {return l.c == r.c;}
+    bool operator==(XExtent<XExtentArg> l, XExtent<XExtentArg> r) {
+        return l.c == r.c;}
 
     template<class YExtentArg>
-    bool operator<(YExtent<YExtentArg> l, YExtent<YExtentArg> r) {return l.c < r.c;}
+    bool operator<(YExtent<YExtentArg> l, YExtent<YExtentArg> r) {
+        return l.c < r.c;}
     template<class YExtentArg>
-    bool operator==(YExtent<YExtentArg> l, YExtent<YExtentArg> r) {return l.c == r.c;}
+    bool operator==(YExtent<YExtentArg> l, YExtent<YExtentArg> r) {
+        return l.c == r.c;}
 
     template<class XExtentArg>
-    auto operator/(XExtent<XExtentArg> e, XExtentArg d) -> XExtent<XExtentArg> {return XExtent<XExtentArg>(e.c/d);}
+    auto operator/(XExtent<XExtentArg> e, XExtentArg d) -> XExtent<XExtentArg> {
+        return XExtent<XExtentArg>(e.c/d);}
     template<class XExtentArg>
-    auto operator*(XExtent<XExtentArg> e, XExtentArg d) -> XExtent<XExtentArg> {return XExtent<XExtentArg>(e.c*d);}
+    auto operator*(XExtent<XExtentArg> e, XExtentArg d) -> XExtent<XExtentArg> {
+        return XExtent<XExtentArg>(e.c*d);}
 
     template<class YExtentArg>
-    auto operator/(YExtent<YExtentArg> e, YExtentArg d) -> YExtent<YExtentArg> {return YExtent<YExtentArg>(e.c/d);}
+    auto operator/(YExtent<YExtentArg> e, YExtentArg d) -> YExtent<YExtentArg> {
+        return YExtent<YExtentArg>(e.c/d);}
     template<class YExtentArg>
-    auto operator*(YExtent<YExtentArg> e, YExtentArg d) -> YExtent<YExtentArg> {return YExtent<YExtentArg>(e.c*d);}
+    auto operator*(YExtent<YExtentArg> e, YExtentArg d) -> YExtent<YExtentArg> {
+        return YExtent<YExtentArg>(e.c*d);}
 
     template<class XPointArg, class YPointArg, class PointArg>
     bool operator<(Point<XPointArg, YPointArg, PointArg> l, Point<XPointArg, YPointArg, PointArg> r) {
@@ -673,14 +693,16 @@ namespace rxmsg{namespace traits{
 }}
 using rxmsg::traits::rx_measurement_traits;
 
-#if 0
+#if 1
 namespace rxtheme {
 
-template<class Tag>
+template<class MessageArg>
 class theme_data {
-    typedef Tag tag;
-    typedef decltype(rx_window_traits(tag())) traits;
-    typedef typename traits::Message Message;
+public:
+    typedef MessageArg Message;
+
+    ~theme_data() {
+        themechanged.Dispose();}
 
     theme_data(HWND w, std::wstring c, const typename Message::Observable& m) :
             window(w),
@@ -692,19 +714,18 @@ class theme_data {
             handle.reset(OpenThemeData(window, classId.c_str()));
             if (!handle) {
                 throw std::runtime_error("theme data not loaded");}
-        }
+        };
 
-        rx::from(messages)
-            .where(messageId<WM_THEMECHANGED>())
+        themechanged.Set(rx::from(messages)
+            .where(rxmsg::messageId<WM_THEMECHANGED>())
             .subscribe([loadThemeData](const Message& m){
-                rxmsg::set_handled(m); loadThemeData()});
+                rxmsg::set_handled(m); loadThemeData();}));
 
         loadThemeData();
     }
 
-public:
-
     HWND window;
+    rx::SharedDisposable themechanged;
     std::wstring classId;
     typename Message::Observable messages;
     l::wr::unique_theme_data handle;
@@ -712,31 +733,42 @@ public:
 private:
 };
 
-template<class Tag>
+template<class Tag, class MessageArg>
 struct label {
     typedef Tag tag;
-    typedef decltype(rx_window_traits(tag())) traits;
-    typedef typename traits::Message Message;
-    typedef rxmsg::measurement<tag> measurement;
-    typedef std::shared_ptr<rx::BehaviorSubject<measurement>> MeasurementSubject;
-    typedef std::shared_ptr<rx::Observable<measurement>> MeasurementObservable;
+    typedef decltype(rx_measurement_traits(tag())) traits;
+    typedef MessageArg Message;
+    typedef typename traits::Rect Rect;
+    typedef typename traits::Measurement Measurement;
 
     label(HWND w, const typename Message::Observable& m) : 
-        window(w), messages(m), theme(window, L"static", messages) {
+        window(w), messages(m), theme(std::make_shared<theme_data<Message>>(window, L"static", messages)) {
     } 
-    MeasurementObservable measure() {return rx::observable(measureSubject);}
     HWND window;
     typename Message::Observable messages;
-    theme_data<tag> theme;
-    MeasurementSubject measureSubject;
-    measurement measureText() 
+    std::shared_ptr<theme_data<Message>> theme;
+    Measurement measureText() 
     {
-        measurement result;
+        Rect r;
+        Measurement m;
         HDC dc = GetDC(window);
         auto text = l::wnd::get_text(window);
-        auto font = l::wnd::select_font(dc, GetFont(window));
-        measurement = TextExtent(dc, text.c_str());
-        return result;
+        GetThemeTextExtent(
+          theme->handle.get(),
+          dc,
+          TEXT_LABEL,
+          0,
+          text.c_str(),
+          text.size(),
+          DT_LEFT | DT_TOP,
+          nullptr,
+          &r.r
+        );
+        m.left = r.getLeft();
+        m.top = r.getTop();
+        m.right = r.getRight();
+        m.bottom = r.getBottom();
+        return m;
     }
 };
 
@@ -783,6 +815,7 @@ namespace RootWindow
 
     struct label {
         typedef rxmsg::window_measure<rxmsg::traits::Default> label_measure;
+        typedef rxtheme::label<rxmsg::traits::Default, rxmsg::subclass_message> text_measure;
         typedef label_measure::XPoint XPoint;
         typedef label_measure::YPoint YPoint;
         typedef label_measure::XExtent XExtent;
@@ -795,12 +828,14 @@ namespace RootWindow
             , window(CreateChildWindow(L"Static", this->text.c_str(), p, hInstance, parent))
             , messages(rx::CreateSubject<rxmsg::subclass_message>())
             , subclass(rxmsg::set_window_subclass(window.get(), messages))
+            , textmeasure(window.get(), messages)
         {}
         label(label&& o) 
             : text(std::move(o.text))
             , window(std::move(o.window))
             , messages(std::move(o.messages))
             , subclass(std::move(o.subclass))
+            , textmeasure(std::move(o.textmeasure))
         {}
         label& operator=(label o) {
             using std::swap;
@@ -808,12 +843,14 @@ namespace RootWindow
             swap(window,o.window);
             swap(messages,o.messages);
             swap(subclass,o.subclass);
+            swap(textmeasure, o.textmeasure);
         }
 
         std::wstring text;
         l::wr::unique_destroy_window window;
         rxmsg::subclass_message::Subject messages;
         rxmsg::set_subclass_result subclass;
+        text_measure textmeasure;
     };
 
     // note: no base class
@@ -839,7 +876,7 @@ namespace RootWindow
             rx::from(rootMeasurement)
                 .distinct_until_changed()
                 // delay on worker thread
-                .delay(std::chrono::milliseconds(100), worker)
+                .delay(std::chrono::milliseconds(300), worker)
                 .observe_on(mainFormScheduler)
                 .subscribe(
                     [this](top_measure::Measurement m){
@@ -972,30 +1009,37 @@ namespace RootWindow
 
                         cd.Dispose();
                         labels.clear();
+                        maxHeight = 0;
 
                         auto point = rx::from(mousePoint)
                             // make the text appear above the mouse location
-                            .select([](top_measure::Point p){p.p.y -= 30; return p;});
+                            .select([this](top_measure::Point p){
+                                p.p.y -= maxHeight; return p;});
 
                         for (int i = 0; msg[i]; ++i)
                         {
                             POINT loc = {20 * i, 30};
                             auto& charlabel = CreateLabelFromLetter(msg[i], loc, cs.hInstance, handle);
+                            auto labelMeasurement = charlabel.textmeasure.measureText();
+
+                            maxHeight = std::max(maxHeight, labelMeasurement.height().c);
 
                             rx::from(point)
                                 .distinct_until_changed()
                                 // delay on worker thread
                                 .delay(std::chrono::milliseconds(100), worker)
                                 .observe_on(mainFormScheduler)
-                                .subscribe([&charlabel](top_measure::Point p){
-                                    SetWindowPos(charlabel.window.get(), nullptr, p.p.x, p.p.y, 20, 30, SWP_NOOWNERZORDER);
+                                .subscribe([&charlabel, labelMeasurement](top_measure::Point p){
+                                    SetWindowPos(charlabel.window.get(), nullptr, p.p.x, std::max(30L, p.p.y), labelMeasurement.width().c, labelMeasurement.height().c, SWP_NOOWNERZORDER);
                                     InvalidateRect(charlabel.window.get(), nullptr, true);
+                                    UpdateWindow(charlabel.window.get());
                                 });
 
                             point = rx::from(charlabel.messages)
                                 .chain<top_measure::select_parent_measurement>()
                                 // put the next char at the right - top of this char
-                                .select([](top_measure::Measurement m){return top_measure::Point(m.right, m.top);});
+                                .select([](top_measure::Measurement m){
+                                    return top_measure::Point(m.right, m.top);});
                         }
                     },
                 // on completed
@@ -1028,6 +1072,7 @@ namespace RootWindow
 
         HWND root;
         Exceptions* exceptions;
+        int maxHeight;
         std::shared_ptr<rx::Subject<std::wstring>> text;
         rxmsg::message::Subject messages;
         l::wr::unique_destroy_window edit;
