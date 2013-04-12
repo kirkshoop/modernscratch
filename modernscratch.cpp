@@ -325,6 +325,11 @@ struct From {
     From(T t) : t(std::move(t)) {}
     T t;
 };
+template<class FromTag, class T>
+auto make_from(T t) 
+    -> decltype(From<FromTag, T>(std::move(t))) {
+    return      From<FromTag, T>(std::move(t));
+}
 }
 template<class ObservablePoint>
 auto originFrom(ObservablePoint o) 
@@ -368,7 +373,7 @@ auto middleFrom(ObservableYCoordinate o)
     return detail::From<detail::MiddleFrom, ObservableYCoordinate>(std::move(o));}
 
 template<class Tag>
-struct measurement {
+struct Measurement {
     typedef Tag tag;
     typedef decltype(rx_window_traits(tag())) traits;
     typedef typename traits::Message Message;
@@ -379,8 +384,8 @@ struct measurement {
     typedef typename traits::Point Point;
     typedef typename traits::Extent Extent;
 
-    measurement() {}
-    measurement(
+    Measurement() {}
+    Measurement(
         XCoordinate l, YCoordinate t,
         XCoordinate r, YCoordinate b) : 
         left(std::move(l)), top(std::move(t)),
@@ -389,16 +394,16 @@ struct measurement {
     YCoordinate top;
     XCoordinate right;
     YCoordinate bottom;
-    XExtent width() {return right - left;}
-    YExtent height() {return bottom - top;}
-    Point origin() {return Point(left, top);}
-    Extent extent() {return Extent(width(), height());}
-    XCoordinate center() {return left + (width() / 2);}
-    YCoordinate middle() {return top + (height() / 2);}
+    XExtent width() const {return right - left;}
+    YExtent height() const {return bottom - top;}
+    Point origin() const {return Point(left, top);}
+    Extent extent() const {return Extent(width(), height());}
+    XCoordinate center() const {return left + (width() / 2);}
+    YCoordinate middle() const {return top + (height() / 2);}
 };
 
 template<class Tag>
-bool operator==(const measurement<Tag>& l, const measurement<Tag>& r) {
+bool operator==(const Measurement<Tag>& l, const Measurement<Tag>& r) {
     return l.left == r.left && l.top == r.top && l.right == r.right && l.bottom == r.bottom;
 }
 
@@ -413,7 +418,8 @@ struct window_size : public std::enable_shared_from_this<window_size<Tag>> {
     typedef typename traits::YExtent YExtent;
     typedef typename traits::Point Point;
     typedef typename traits::Extent Extent;
-    typedef measurement<tag> measurement;
+    typedef typename traits::Rect Rect;
+    typedef Measurement<tag> measurement;
     typedef std::shared_ptr<rx::Observer<XCoordinate>> ObserverXCoordinate;
     typedef std::shared_ptr<rx::Observer<YCoordinate>> ObserverYCoordinate;
     typedef std::shared_ptr<rx::Observer<XExtent>> ObserverXExtent;
@@ -744,6 +750,369 @@ private:
     SubjectYCoordinate subjectMiddle;
 };
 
+namespace detail {
+    struct FromLeft {};
+    struct FromTop {};
+    struct FromRight {};
+    struct FromBottom {};
+    struct FromWidth {};
+    struct FromHeight {};
+
+    template<class FromTag>
+    struct MeasureFrom;
+
+    template<>
+    struct MeasureFrom<detail::FromLeft> {
+        template<class Tag, class Operation>
+        static auto measureFrom(const Measurement<Tag>& m, Operation o) 
+            -> decltype(m.left) {
+            return m.left + o(m.width());
+        }
+    };
+    template<>
+    struct MeasureFrom<detail::FromTop> {
+        template<class Tag, class Operation>
+        static auto measureFrom(const Measurement<Tag>& m, Operation o) 
+            -> decltype(m.top) {
+            return m.top + o(m.height());
+        }
+    };
+    template<>
+    struct MeasureFrom<detail::FromRight> {
+        template<class Tag, class Operation>
+        static auto measureFrom(const Measurement<Tag>& m, Operation o) 
+            -> decltype(m.right) {
+            return m.right - o(m.width());
+        }
+    };
+    template<>
+    struct MeasureFrom<detail::FromBottom> {
+        template<class Tag, class Operation>
+        static auto measureFrom(const Measurement<Tag>& m, Operation o) 
+            -> decltype(m.bottom) {
+            return m.bottom - o(m.height());
+        }
+    };
+    template<class Tag, class... FromTag, class... T> 
+    auto measureFrom(const Measurement<Tag>& m, const From<FromTag, T>&... ft)
+        -> decltype(std::make_tuple(MeasureFrom<FromTag>::measureFrom(m, ft.t)...)) {
+        return      std::make_tuple(MeasureFrom<FromTag>::measureFrom(m, ft.t)...);
+    }
+
+    template<class Tag>
+    struct operators {
+        typedef Tag tag;
+        typedef decltype(rx_window_traits(tag())) traits;
+        typedef typename traits::Message Message;
+        typedef typename traits::XCoordinate XCoordinate;
+        typedef typename traits::YCoordinate YCoordinate;
+        typedef typename traits::XExtent XExtent;
+        typedef typename traits::YExtent YExtent;
+        typedef typename traits::Point Point;
+        typedef typename traits::Extent Extent;
+        typedef typename traits::Rect Rect;
+        typedef Measurement<tag> measurement;
+
+        template<class... FromTag, class... T>
+        static auto SelectFromMeasurement(
+            const std::shared_ptr<rx::Observable<Measurement<Tag>>>& source, 
+            const From<FromTag, T>&... from) 
+            -> std::shared_ptr<rx::Observable<
+                    decltype(measureFrom(Measurement<Tag>(), from...))>> {
+            typedef decltype(measureFrom(Measurement<Tag>(), from...)) U;
+            return rx::CreateObservable<U>(
+                [=](const std::shared_ptr<rx::Observer<U>>& observer) {
+                    return rx::from(source)
+                        .subscribe(
+                        // on next
+                            [=](Measurement<Tag> m){
+                                observer->OnNext(measureFrom<Tag>(m, from...));
+                            },
+                        // on completed
+                            [=](){
+                                observer->OnCompleted();
+                            }, 
+                        // on error
+                            [=](const std::exception_ptr& e){
+                                observer->OnError(e);
+                        });
+                });
+        }
+
+        template<class Message>
+        static auto SelectClientMeasurement(const std::shared_ptr<rx::Observable<Message>>& source) 
+            -> std::shared_ptr<rx::Observable<Measurement<Tag>>> {
+            return rx::CreateObservable<Measurement<Tag>>(
+                [=](const std::shared_ptr<rx::Observer<Measurement<Tag>>>& observer) {
+                    return rx::from(source)
+                        .where(messageId<WM_WINDOWPOSCHANGED>())
+                        .select([](const Message& msg){
+                            // expands to:
+                            // return HANDLE_WM_WINDOWPOSCHANGED(m.window, m.wParam, m.lParam, rxmsg::HandleMessage(m));
+                            return RXCPP_HANDLE_MESSAGE(WM_WINDOWPOSCHANGED, msg);})
+                        .subscribe(
+                        // on next
+                            rxcpp::MakeTupleDispatch([=](const LPWINDOWPOS pos, const Message& msg){
+                                RECT client = {};
+                                GetClientRect(msg.window, &client);
+                                Measurement<Tag> m(
+                                    XCoordinate(client.left),
+                                    YCoordinate(client.top),
+                                    XCoordinate(client.right),
+                                    YCoordinate(client.bottom)
+                                );
+                                observer->OnNext(m);
+                            }),
+                        // on completed
+                            [=](){
+                                observer->OnCompleted();
+                            }, 
+                        // on error
+                            [=](const std::exception_ptr& e){
+                                observer->OnError(e);
+                        });
+                });
+        }
+
+        template<class Message>
+        static auto SelectScreenMeasurement(const std::shared_ptr<rx::Observable<Message>>& source) 
+            -> std::shared_ptr<rx::Observable<Measurement<Tag>>> {
+            return rx::CreateObservable<Measurement<Tag>>(
+                [=](const std::shared_ptr<rx::Observer<Measurement<Tag>>>& observer) {
+                    return rx::from(source)
+                        .where(messageId<WM_WINDOWPOSCHANGED>())
+                        .select([](const Message& msg){
+                            // expands to:
+                            // return HANDLE_WM_WINDOWPOSCHANGED(m.window, m.wParam, m.lParam, rxmsg::HandleMessage(m));
+                            return RXCPP_HANDLE_MESSAGE(WM_WINDOWPOSCHANGED, msg);})
+                        .subscribe(
+                        // on next
+                            rxcpp::MakeTupleDispatch([=](const LPWINDOWPOS pos, const Message& msg){
+                                RECT screen = {};
+                                GetWindowRect(msg.window, &screen);
+                                Measurement<Tag> m(
+                                    XCoordinate(screen.left),
+                                    YCoordinate(screen.top),
+                                    XCoordinate(screen.right),
+                                    YCoordinate(screen.bottom)
+                                );
+                                observer->OnNext(m);
+                            }),
+                        // on completed
+                            [=](){
+                                observer->OnCompleted();
+                            }, 
+                        // on error
+                            [=](const std::exception_ptr& e){
+                                observer->OnError(e);
+                        });
+                });
+        }
+
+        template<class Message>
+        static auto SelectParentMeasurement(const std::shared_ptr<rx::Observable<Message>>& source) 
+            -> std::shared_ptr<rx::Observable<Measurement<Tag>>> {
+            return rx::CreateObservable<Measurement<Tag>>(
+                [=](const std::shared_ptr<rx::Observer<Measurement<Tag>>>& observer) {
+                    return rx::from(source)
+                        .where(messageId<WM_WINDOWPOSCHANGED>())
+                        .select([](const Message& msg){
+                            // expands to:
+                            // return HANDLE_WM_WINDOWPOSCHANGED(m.window, m.wParam, m.lParam, rxmsg::HandleMessage(m));
+                            return RXCPP_HANDLE_MESSAGE(WM_WINDOWPOSCHANGED, msg);})
+                        .subscribe(
+                        // on next
+                            rxcpp::MakeTupleDispatch([=](const LPWINDOWPOS pos, const Message& msg){
+                                RECT screen = {};
+                                GetWindowRect(msg.window, &screen);
+                                auto parent = GetAncestor(msg.window, GA_PARENT);
+                                RECT mapped = screen;
+                                if (parent != HWND_DESKTOP) {
+                                    MapWindowPoints(HWND_DESKTOP, parent, (LPPOINT)&mapped, 2);
+                                }
+                                Measurement<Tag> m(
+                                    XCoordinate(mapped.left),
+                                    YCoordinate(mapped.top),
+                                    XCoordinate(mapped.right),
+                                    YCoordinate(mapped.bottom)
+                                );
+                                observer->OnNext(m);
+                            }),
+                        // on completed
+                            [=](){
+                                observer->OnCompleted();
+                            }, 
+                        // on error
+                            [=](const std::exception_ptr& e){
+                                observer->OnError(e);
+                        });
+                });
+        }
+
+    };
+
+    struct scale {
+        float factor;
+        scale(float f) : factor(f) {}
+        template<class T>
+        T operator()(T t) {return t * f;}
+    };
+
+    template<class T>
+    struct set {
+        T t;
+        set(T targ) : t(targ) {}
+        T operator()(T) {return t;}
+    };
+}
+
+template<class Tag>
+struct select_client_measurement {};
+template<class Tag, class Message>
+auto rxcpp_chain(select_client_measurement<Tag>&&, const std::shared_ptr<rx::Observable<Message>>& source) 
+    -> decltype(detail::operators<Tag>::SelectClientMeasurement(source)) {
+    return      detail::operators<Tag>::SelectClientMeasurement(source);
+}
+
+template<class Tag>
+struct select_screen_measurement {};
+template<class Tag, class Message>
+auto rxcpp_chain(select_screen_measurement<Tag>&&, const std::shared_ptr<rx::Observable<Message>>& source) 
+    -> decltype(detail::operators<Tag>::SelectScreenMeasurement(source)) {
+    return      detail::operators<Tag>::SelectScreenMeasurement(source);
+}
+
+template<class Tag>
+struct select_parent_measurement {};
+template<class Tag, class Message>
+auto rxcpp_chain(select_parent_measurement<Tag>&&, const std::shared_ptr<rx::Observable<Message>>& source) 
+    -> decltype(detail::operators<Tag>::SelectParentMeasurement(source)) {
+    return      detail::operators<Tag>::SelectParentMeasurement(source);
+}
+
+template<class Tag>
+struct select_from_measurement {};
+template<class Tag, class... FromTag, class... T>
+auto rxcpp_chain(select_from_measurement<Tag>&&, const std::shared_ptr<rx::Observable<Measurement<Tag>>>& source, const detail::From<FromTag, T>&... from) 
+    -> decltype(detail::operators<Tag>::SelectFromMeasurement(source, from...)) {
+    return      detail::operators<Tag>::SelectFromMeasurement(source, from...);
+}
+
+
+template<class Tag>
+struct window_measure {
+    typedef Tag tag;
+    typedef decltype(rx_window_traits(tag())) traits;
+    typedef typename traits::Message Message;
+    typedef typename traits::XCoordinate XCoordinate;
+    typedef typename traits::YCoordinate YCoordinate;
+    typedef typename traits::XExtent XExtent;
+    typedef typename traits::YExtent YExtent;
+    typedef typename traits::Point Point;
+    typedef typename traits::Extent Extent;
+    typedef typename traits::Rect Rect;
+    typedef Measurement<tag> measurement;
+    typedef select_client_measurement<Tag> select_client_measurement;
+    typedef select_screen_measurement<Tag> select_screen_measurement;
+    typedef select_parent_measurement<Tag> select_parent_measurement;
+    typedef select_from_measurement<Tag> select_from_measurement;
+
+
+    static XExtent zeroXExtent(XExtent) {return XExtent(0);} 
+    static YExtent zeroYExtent(YExtent) {return YExtent(0);}
+
+#if 1
+    static auto fromLeft() 
+        ->     decltype(detail::make_from<detail::FromLeft>(zeroXExtent)) {
+        return          detail::make_from<detail::FromLeft>(zeroXExtent);}
+    static auto fromLeft(float factor) 
+        ->     decltype(detail::make_from<detail::FromLeft>(detail::scale(factor))) {
+        return          detail::make_from<detail::FromLeft>(detail::scale(factor));}
+    static auto fromTop() 
+        ->     decltype(detail::make_from<detail::FromTop>(zeroYExtent)) {
+        return          detail::make_from<detail::FromTop>(zeroYExtent);}
+    static auto fromTop(float factor) 
+        ->     decltype(detail::make_from<detail::FromTop>(detail::scale(factor))) {
+        return          detail::make_from<detail::FromTop>(detail::scale(factor));}
+    static auto fromRight() 
+        ->     decltype(detail::make_from<detail::FromRight>(zeroXExtent)) {
+        return          detail::make_from<detail::FromRight>(zeroXExtent);}
+    static auto fromRight(float factor) 
+        ->     decltype(detail::make_from<detail::FromRight>(detail::scale(factor))) {
+        return          detail::make_from<detail::FromRight>(detail::scale(factor));}
+    static auto fromBottom() 
+        ->     decltype(detail::make_from<detail::FromBottom>(zeroYExtent)) {
+        return          detail::make_from<detail::FromBottom>(zeroYExtent);}
+    static auto fromBottom(float factor) 
+        ->     decltype(detail::make_from<detail::FromBottom>(detail::scale(factor))) {
+        return          detail::make_from<detail::FromBottom>(detail::scale(factor));}
+    static auto fromWidth() 
+        ->     decltype(detail::make_from<detail::FromWidth>(zeroXExtent)) {
+        return          detail::make_from<detail::FromWidth>(zeroXExtent);}
+    static auto fromWidth(float factor) 
+        ->     decltype(detail::make_from<detail::FromWidth>(detail::scale(factor))) {
+        return          detail::make_from<detail::FromWidth>(detail::scale(factor));}
+    static auto fromHeight(YExtent value)
+        ->     decltype(detail::make_from<detail::FromHeight>(detail::set<YExtent>(value))) {
+        return          detail::make_from<detail::FromHeight>(detail::set<YExtent>(value));}
+#else
+    static auto fromLeft() 
+        ->     decltype(detail::make_from<detail::FromLeft>(zeroXExtent)) {
+        return          detail::make_from<detail::FromLeft>(zeroXExtent);}
+    static auto fromLeft(float factor) 
+        ->     decltype(detail::make_from<detail::FromLeft>(detail::scale(factor))) {
+        return          detail::make_from<detail::FromLeft>(detail::scale(factor));}
+    static auto fromLeft(XExtent value)
+        ->     decltype(detail::make_from<detail::FromLeft>(detail::set<XExtent>(value))) {
+        return          detail::make_from<detail::FromLeft>(detail::set<XExtent>(value));}
+    static auto fromTop() 
+        ->     decltype(detail::make_from<detail::FromTop>(zeroYExtent)) {
+        return          detail::make_from<detail::FromTop>(zeroYExtent);}
+    static auto fromTop(float factor) 
+        ->     decltype(detail::make_from<detail::FromTop>(detail::scale(factor))) {
+        return          detail::make_from<detail::FromTop>(detail::scale(factor));}
+    static auto fromTop(YExtent value)
+        ->     decltype(detail::make_from<detail::FromRight>(detail::set<YExtent>(value))) {
+        return          detail::make_from<detail::FromRight>(detail::set<YExtent>(value));}
+    static auto fromRight() 
+        ->     decltype(detail::make_from<detail::FromRight>(zeroXExtent)) {
+        return          detail::make_from<detail::FromRight>(zeroXExtent);}
+    static auto fromRight(float factor) 
+        ->     decltype(detail::make_from<detail::FromRight>(detail::scale(factor))) {
+        return          detail::make_from<detail::FromRight>(detail::scale(factor));}
+    static auto fromRight(XExtent value)
+        ->     decltype(detail::make_from<detail::FromRight>(detail::set<XExtent>(value))) {
+        return          detail::make_from<detail::FromRight>(detail::set<XExtent>(value));}
+    static auto fromBottom() 
+        ->     decltype(detail::make_from<detail::FromBottom>(zeroYExtent)) {
+        return          detail::make_from<detail::FromBottom>(zeroYExtent);}
+    static auto fromBottom(float factor) 
+        ->     decltype(detail::make_from<detail::FromBottom>(detail::scale(factor))) {
+        return          detail::make_from<detail::FromBottom>(detail::scale(factor));}
+    static auto fromBottom(YExtent value)
+        ->     decltype(detail::make_from<detail::FromBottom>(detail::set<YExtent>(value))) {
+        return          detail::make_from<detail::FromBottom>(detail::set<YExtent>(value));}
+    static auto fromWidth() 
+        ->     decltype(detail::make_from<detail::FromWidth>(zeroXExtent)) {
+        return          detail::make_from<detail::FromWidth>(zeroXExtent);}
+    static auto fromWidth(float factor) 
+        ->     decltype(detail::make_from<detail::FromWidth>(detail::scale(factor))) {
+        return          detail::make_from<detail::FromWidth>(detail::scale(factor));}
+    static auto fromWidth(XExtent value)
+        ->     decltype(detail::make_from<detail::FromWidth>(detail::set<XExtent>(value))) {
+        return          detail::make_from<detail::FromWidth>(detail::set<XExtent>(value));}
+    static auto fromHeight() 
+        ->     decltype(detail::make_from<detail::FromHeight>(zeroYExtent)) {
+        return          detail::make_from<detail::FromHeight>(zeroYExtent);}
+    static auto fromHeight(float factor) 
+        ->     decltype(detail::make_from<detail::FromHeight>(detail::scale(factor))) {
+        return          detail::make_from<detail::FromHeight>(detail::scale(factor));}
+    static auto fromHeight(YExtent value)
+        ->     decltype(detail::make_from<detail::FromHeight>(detail::set<YExtent>(value))) {
+        return          detail::make_from<detail::FromHeight>(detail::set<YExtent>(value));}
+#endif
+};
+
 template<class Tag>
 class stack {
 public:
@@ -752,6 +1121,7 @@ private:
 };
 
 }
+using rxmsg::rxcpp_chain;
 
 namespace rxmsg{namespace traits{
     template<class XCoordinateArg>
@@ -802,6 +1172,17 @@ namespace rxmsg{namespace traits{
         explicit Extent(ExtentArg earg) {e = earg;}
         Extent(const Extent& e) : e(e.e) {}
     };
+    template<class XCoordinateArg, class YCoordinateArg, class RectArg>
+    struct Rect {
+        typedef XCoordinate<XCoordinateArg> XCoordinate;
+        typedef YCoordinate<YCoordinateArg> YCoordinate;
+        RectArg r;
+        Rect() {r.left = 0; r.top = 0; r.right = 0; r.bottom = 0;}
+        Rect(XCoordinate l, YCoordinate t, XCoordinate r, YCoordinate b) {
+            r.left = l.c; r.top = t.c; r.right = r.c; r.bottom = b.c;}
+        explicit Rect(RectArg rarg) {r = rarg;}
+        Rect(const Rect& p) : p(p.p) {}
+    };
 
     template<class XCoordinateArg>
     auto operator-(XCoordinate<XCoordinateArg> r, XCoordinate<XCoordinateArg> l) -> XExtent<decltype(r.c - l.c)> {return XExtent<decltype(r.c - l.c)>(r.c - l.c);}
@@ -847,25 +1228,34 @@ namespace rxmsg{namespace traits{
     template<class YExtentArg>
     auto operator*(YExtent<YExtentArg> e, YExtentArg d) -> YExtent<YExtentArg> {return YExtent<YExtentArg>(e.c*d);}
 
-    template<class XCoordinateArg, class YCoordinateArg, class XExtentArg, class YExtentArg, class PointArg, class ExtentArg, class MessageArg>
+    template<class XCoordinateArg, class YCoordinateArg, class XExtentArg, class YExtentArg, class PointArg, class ExtentArg, class RectArg, class MessageArg>
     struct window_traits_builder {
+        typedef XCoordinateArg XCoordinateRaw;
+        typedef YCoordinateArg YCoordinateRaw;
+        typedef XExtentArg XExtentRaw;
+        typedef YExtentArg YExtentRaw;
+        typedef PointArg PointRaw;
+        typedef ExtentArg ExtentRaw;
+        typedef RectArg RectRaw;
         typedef XCoordinate<XCoordinateArg> XCoordinate;
         typedef YCoordinate<YCoordinateArg> YCoordinate;
         typedef XExtent<XExtentArg> XExtent;
         typedef YExtent<YExtentArg> YExtent;
         typedef Point<XCoordinateArg, YCoordinateArg, PointArg> Point;
         typedef Extent<XExtentArg, YExtentArg, ExtentArg> Extent;
+        typedef Rect<XCoordinateArg, YCoordinateArg, RectArg> Rect;
         typedef MessageArg Message;
     };
 
     struct OwnDefault {};
-    window_traits_builder<int, int, int, int, POINT, SIZE, message> rx_window_traits(OwnDefault&&);
+    window_traits_builder<int, int, int, int, POINT, SIZE, RECT, message> rx_window_traits(OwnDefault&&);
 
     struct SubclassDefault {};
-    window_traits_builder<int, int, int, int, POINT, SIZE, subclass_message> rx_window_traits(SubclassDefault&&);
+    window_traits_builder<int, int, int, int, POINT, SIZE, RECT, subclass_message> rx_window_traits(SubclassDefault&&);
 }}
 using rxmsg::traits::rx_window_traits;
 
+#if 0
 namespace rxtheme {
 
 template<class Tag>
@@ -933,6 +1323,7 @@ struct label {
 };
 
 }
+#endif
 
 bool operator==(POINT lhs, POINT rhs)
 {
@@ -1014,7 +1405,9 @@ namespace RootWindow
     // note: no base class
     struct window
     {
+        typedef rxmsg::window_measure<rxmsg::traits::OwnDefault> top_measure;
         typedef rxmsg::window_size<rxmsg::traits::OwnDefault> top_size;
+        typedef rxmsg::window_measure<rxmsg::traits::SubclassDefault> subclass_measure;
         typedef rxmsg::window_size<rxmsg::traits::SubclassDefault> subclass_size;
         window(HWND handle, CREATESTRUCT& cs)
             : root(handle)
@@ -1029,6 +1422,7 @@ namespace RootWindow
             , mouseX(rx::CreateBehaviorSubject<typename label::XCoordinate>(label::XCoordinate()))
             , mouseY(rx::CreateBehaviorSubject<typename label::YCoordinate>(label::YCoordinate()))
         {
+#if 0
             rx::from(editSize->create_binding(
                 rxmsg::leftFrom(size->left()),
                 rxmsg::topFrom(size->top()),
@@ -1039,7 +1433,25 @@ namespace RootWindow
                 SetWindowPos(edit.get(), nullptr, m.left.c, m.top.c, m.width().c, m.height().c, SWP_NOOWNERZORDER);
                 InvalidateRect(edit.get(), nullptr, true);
             });
+#endif
+#if 0
+            rx::from(messages)
+                .chain<top_measure::select_client_measurement>()
+                .chain<top_measure::select_from_measurement>(
+                    top_measure::fromLeft(), top_measure::fromTop(), top_measure::fromWidth(), top_measure::fromHeight(top_measure::YExtent(30)))
+                .subscribe(rx::MakeTupleDispatch(
+                    [this](top_measure::XCoordinate left, top_measure::YCoordinate top, top_measure::XExtent width, top_measure::YExtent height){
+                        SetWindowPos(edit.get(), nullptr, left.c, top.c, width.c, height.c, SWP_NOOWNERZORDER);
+                        InvalidateRect(edit.get(), nullptr, true);
+                    }));
 
+            rx::from(editMessages)
+                .chain<subclass_measure::select_parent_measurement>()
+                .chain<subclass_measure::select_from_measurement>(top_measure::fromBottom())
+                .subscribe(rx::MakeTupleDispatch(
+                    [](subclass_measure::YCoordinate bottom){
+                    }));
+#endif
             auto commands = rx::from(messages)
                 .where(rxmsg::messageId<WM_COMMAND>())
                 .select([this](const rxmsg::message& m){
