@@ -22,6 +22,11 @@
 
 #pragma comment(linker,"\"/manifestdependency:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
+#include <iostream>
+#include <sstream>
+#include <chrono>
+#include <ctime>
+
 #include <new>
 #include <utility>
 #include <memory>
@@ -243,73 +248,153 @@ l::wnd::dispatch_result window_message_error_contract(Function&& function, const
 }
 
 namespace detail {
-template<class T, class Msg>
-struct extract_args {
-    extract_args() : m(nullptr) {}
-    const Msg* m;
-    T result;
-    T operator,(long lResult) {if(!!m) {set_lResult(*m, lResult); set_handled(*m);} return std::move(result);}
+// this 'too clever for its own good' class
+// will use the comma operator to reuse
+// the windowsx.h HANDLE_WM_ macros 
+struct extract_lresult {
+    LRESULT operator,(LRESULT lResult) {
+        return lResult;}
+    operator LRESULT() {return 0;}
 };
+}
 
-namespace mark_handled {
-    enum type {
-        Yes,
-        No
+template<class Tag, unsigned int Id, class... T>
+struct message_trait_builder {
+    typedef Tag tag;
+    static const unsigned int id = Id;
+
+    template<class Message>
+    struct args {
+        typedef std::tuple<T..., Message> type;
     };
-}
 
-template<class Msg>
-struct handle_message;
-
-template<>
-struct handle_message<message> {
-    const message* m;
-    mark_handled::type mark;
-    explicit handle_message(const message& m, mark_handled::type mark = mark_handled::Yes) : m(&m), mark(mark) {}
-    template<class... T>
-    detail::extract_args<std::tuple<T..., message>, message> operator()(HWND, T... t) {
-        detail::extract_args<std::tuple<T..., message>, message> result;
-        if (mark == mark_handled::Yes) {
-            result.m = m;
-        }
-        result.result = std::make_tuple(t..., *m);
-        return std::move(result);
+    template<class Message>
+    static typename args<Message>::type crack(Message m) {
+        typedef typename args<Message>::type args_type;
+        args_type result;
+        set_lResult(m, rxmsg_crack(tag(), m, [&](HWND, T... t) -> detail::extract_lresult {
+            result = args_type(t..., m); return detail::extract_lresult();}));
+        return result;
     }
 };
 
-template<>
-struct handle_message<subclass_message> {
-    const subclass_message* m;
-    mark_handled::type mark;
-    explicit handle_message(const subclass_message& m, mark_handled::type mark = mark_handled::Yes) : m(&m), mark(mark) {}
-    template<class... T>
-    detail::extract_args<std::tuple<T..., subclass_message>, subclass_message> operator()(HWND, T... t) {
-        detail::extract_args<std::tuple<T..., subclass_message>, subclass_message> result;
-        if (mark == mark_handled::Yes) {
-            result.m = m;
-        }
-        result.result = std::make_tuple(t..., *m);
-        return std::move(result);
-    }
+template<class Tag>
+struct message_traits {
+    typedef decltype(rxmsg_traits(Tag())) type;
 };
-}
-template<class Msg>
-detail::handle_message<Msg> crack_message(const Msg& m) {return detail::handle_message<Msg>(m, detail::mark_handled::No);}
-template<class Msg>
-detail::handle_message<Msg> handle_message(const Msg& m) {return detail::handle_message<Msg>(m);}
 
-#define RXCPP_HANDLE_MESSAGE(id, m) HANDLE_ ## id ((m).window, (m).wParam, (m).lParam, rxmsg::handle_message(m))
-#define RXCPP_CRACK_MESSAGE(id, m) HANDLE_ ## id ((m).window, (m).wParam, (m).lParam, rxmsg::crack_message(m))
-// not tried yet.
-//#define RXCPP_MESSAGE_IF(id, m, predicate) rxcpp::DispatchTuple(HANDLE_ ## id ((m).window, (m).wParam, (m).lParam, rxmsg::crack_message(m)), predicate)
-
-template<UINT id>
+template<class Tag>
 struct messageId {
+    typedef typename message_traits<Tag>::type message_traits;
+    static const unsigned int id = message_traits::id; 
+
     template<class Msg>
     bool operator()(const Msg& m) const {
         return !handled(m) && m.id == id;
     }
 };
+
+template<class Tag, class Message>
+auto handle_message(Message m) 
+    -> decltype(message_traits<Tag>::type::crack(m)) {
+    set_handled(m);
+    return message_traits<Tag>::type::crack(m);
+}
+
+template<class Tag, class Message>
+auto crack_message(Message m) 
+    -> decltype(message_traits<Tag>::type::crack(m)) {
+    return message_traits<Tag>::type::crack(m);
+}
+
+namespace wm {
+    namespace detail {
+    struct paint {};
+    message_trait_builder<paint, WM_PAINT> rxmsg_traits(paint&&);
+    template<class M, class F>
+    LRESULT rxmsg_crack(paint&&, M message, F function){
+        return HANDLE_WM_PAINT(message.window, message.wParam, message.lParam, function);}
+    }
+    typedef detail::paint paint;
+
+    namespace detail {
+    struct printclient {};
+    message_trait_builder<printclient, WM_PRINTCLIENT, HDC, UINT> rxmsg_traits(printclient&&);
+    template<class M, class F>
+    LRESULT rxmsg_crack(printclient&&, M message, F function){
+        return function(message.window, reinterpret_cast<HDC>(message.wParam), static_cast<UINT>(message.lParam));}
+    }
+    typedef detail::printclient printclient;
+
+    namespace detail {
+    struct windowposchanged {};
+    message_trait_builder<windowposchanged, WM_WINDOWPOSCHANGED, LPWINDOWPOS> rxmsg_traits(windowposchanged&&);
+    template<class M, class F>
+    LRESULT rxmsg_crack(windowposchanged&&, M message, F function){
+        return HANDLE_WM_WINDOWPOSCHANGED(message.window, message.wParam, message.lParam, function);}
+    }
+    typedef detail::windowposchanged windowposchanged;
+
+    namespace detail {
+    struct erasebkgnd {};
+    message_trait_builder<erasebkgnd, WM_ERASEBKGND, HDC> rxmsg_traits(erasebkgnd&&);
+    template<class M, class F>
+    LRESULT rxmsg_crack(erasebkgnd&&, M message, F function){
+        return HANDLE_WM_ERASEBKGND(message.window, message.wParam, message.lParam, function);}
+    }
+    typedef detail::erasebkgnd erasebkgnd;
+
+    namespace detail {
+    struct command {};
+    message_trait_builder<command, WM_COMMAND, int, HWND, UINT> rxmsg_traits(command&&);
+    template<class M, class F>
+    LRESULT rxmsg_crack(command&&, M message, F function){
+        return HANDLE_WM_COMMAND(message.window, message.wParam, message.lParam, function);}
+    }
+    typedef detail::command command;
+
+    namespace detail {
+    struct ncdestroy {};
+    message_trait_builder<ncdestroy, WM_NCDESTROY> rxmsg_traits(ncdestroy&&);
+    template<class M, class F>
+    LRESULT rxmsg_crack(ncdestroy&&, M message, F function){
+        return HANDLE_WM_NCDESTROY(message.window, message.wParam, message.lParam, function);}
+    }
+    typedef detail::ncdestroy ncdestroy;
+
+    namespace detail {
+    struct lbuttondown {};
+    message_trait_builder<lbuttondown, WM_LBUTTONDOWN, BOOL, int, int, UINT> rxmsg_traits(lbuttondown&&);
+    template<class M, class F>
+    LRESULT rxmsg_crack(lbuttondown&&, M message, F function){
+        return HANDLE_WM_LBUTTONDOWN(message.window, message.wParam, message.lParam, function);}
+    }
+    typedef detail::lbuttondown lbuttondown;
+
+    namespace detail {
+    struct lbuttonup {};
+    message_trait_builder<lbuttonup, WM_LBUTTONUP, int, int, UINT> rxmsg_traits(lbuttonup&&);
+    template<class M, class F>
+    LRESULT rxmsg_crack(lbuttonup&&, M message, F function){
+        return HANDLE_WM_LBUTTONUP(message.window, message.wParam, message.lParam, function);}
+    }
+    typedef detail::lbuttonup lbuttonup;
+
+    namespace detail {
+    struct mousemove {};
+    message_trait_builder<mousemove, WM_MOUSEMOVE, int, int, UINT> rxmsg_traits(mousemove&&);
+    template<class M, class F>
+    LRESULT rxmsg_crack(mousemove&&, M message, F function){
+        return HANDLE_WM_MOUSEMOVE(message.window, message.wParam, message.lParam, function);}
+    }
+    typedef detail::mousemove mousemove;
+
+    namespace detail {
+    struct themechanged {};
+    message_trait_builder<themechanged, WM_THEMECHANGED> rxmsg_traits(themechanged&&);
+    }
+    typedef detail::themechanged themechanged;
+}
 
 namespace detail {
 
@@ -333,11 +418,9 @@ namespace detail {
             return rx::CreateObservable<Measurement>(
                 [=](const std::shared_ptr<rx::Observer<Measurement>>& observer) {
                     return rx::from(source)
-                        .where(messageId<WM_WINDOWPOSCHANGED>())
+                        .where(messageId<rxmsg::wm::windowposchanged>())
                         .select([](const Message& msg){
-                            // expands to:
-                            // return HANDLE_WM_WINDOWPOSCHANGED(m.window, m.wParam, m.lParam, rxmsg::HandleMessage(m));
-                            return RXCPP_HANDLE_MESSAGE(WM_WINDOWPOSCHANGED, msg);})
+                            return rxmsg::crack_message<rxmsg::wm::windowposchanged>(msg);})
                         .subscribe(
                         // on next
                             rxcpp::MakeTupleDispatch([=](const LPWINDOWPOS pos, const Message& msg){
@@ -368,11 +451,9 @@ namespace detail {
             return rx::CreateObservable<Measurement>(
                 [=](const std::shared_ptr<rx::Observer<Measurement>>& observer) {
                     return rx::from(source)
-                        .where(messageId<WM_WINDOWPOSCHANGED>())
+                        .where(messageId<rxmsg::wm::windowposchanged>())
                         .select([](const Message& msg){
-                            // expands to:
-                            // return HANDLE_WM_WINDOWPOSCHANGED(m.window, m.wParam, m.lParam, rxmsg::HandleMessage(m));
-                            return RXCPP_HANDLE_MESSAGE(WM_WINDOWPOSCHANGED, msg);})
+                            return rxmsg::crack_message<rxmsg::wm::windowposchanged>(msg);})
                         .subscribe(
                         // on next
                             rxcpp::MakeTupleDispatch([=](const LPWINDOWPOS pos, const Message& msg){
@@ -403,11 +484,9 @@ namespace detail {
             return rx::CreateObservable<Measurement>(
                 [=](const std::shared_ptr<rx::Observer<Measurement>>& observer) {
                     return rx::from(source)
-                        .where(messageId<WM_WINDOWPOSCHANGED>())
+                        .where(messageId<rxmsg::wm::windowposchanged>())
                         .select([](const Message& msg){
-                            // expands to:
-                            // return HANDLE_WM_WINDOWPOSCHANGED(m.window, m.wParam, m.lParam, rxmsg::HandleMessage(m));
-                            return RXCPP_HANDLE_MESSAGE(WM_WINDOWPOSCHANGED, msg);})
+                            return rxmsg::crack_message<rxmsg::wm::windowposchanged>(msg);})
                         .subscribe(
                         // on next
                             rxcpp::MakeTupleDispatch([=](const LPWINDOWPOS pos, const Message& msg){
@@ -529,6 +608,8 @@ bool operator==(const Measurement<Tag>& l, const Measurement<Tag>& r) {
 
 }
 using rxmsg::rxcpp_chain;
+using rxmsg::wm::detail::rxmsg_traits;
+using rxmsg::wm::detail::rxmsg_crack;
 
 namespace rxmsg{namespace traits{
     template<class XPointArg>
@@ -693,7 +774,6 @@ namespace rxmsg{namespace traits{
 }}
 using rxmsg::traits::rx_measurement_traits;
 
-#if 1
 namespace rxtheme {
 
 template<class MessageArg>
@@ -717,7 +797,7 @@ public:
         };
 
         themechanged.Set(rx::from(messages)
-            .where(rxmsg::messageId<WM_THEMECHANGED>())
+            .where(rxmsg::messageId<rxmsg::wm::themechanged>())
             .subscribe([loadThemeData](const Message& m){
                 rxmsg::set_handled(m); loadThemeData();}));
 
@@ -773,7 +853,347 @@ struct label {
 };
 
 }
+
+namespace rxanim {
+    template<class Clock>
+    class time_range {
+    public:
+        typedef Clock clock;
+        typedef typename clock::time_point time_point;
+        typedef typename clock::duration duration_type;
+
+        time_range() {}
+        time_range(time_point s, time_point f) : start(s), finish(f) {}
+        time_range(time_point s, duration_type d) : start(s), finish(s + d) {}
+        time_point start;
+        time_point finish;
+        bool empty() {return start == finish;}
+        bool contains(time_point p) {return p >= start && p < finish;}
+        duration_type duration() {return finish - start;}
+    };
+
+
+    float easeNone(float t) {return t;}
+    float easeSquare(float t) {return t*t;}
+    float easeSquareRoot(float t) {return sqrt(t);}
+
+    struct animation_state {
+        enum type {Pending, Running, Finished};
+    };
+
+    template<class TimeRange, class TimePoint>
+    animation_state::type runOnce(TimeRange r, TimePoint p) {
+        if (p < r.start) {
+            return animation_state::Pending;}
+        if (r.empty() || !r.contains(p)) {
+            return animation_state::Finished;}
+        return animation_state::Running;
+    }
+
+    template<size_t N, class TimeRange, class TimePoint>
+    animation_state::type runN(TimeRange r, TimePoint p) {
+        TimeRange full = r;
+        r.finish = r.start + r.duration() * N;
+        return runOnce(full, p);
+    }
+
+    template<class TimeRange, class TimePoint>
+    float adjustNone(TimeRange r, TimePoint p) {
+        size_t divisor = r.duration().count();
+        return ((p < r.start ? (r.start - p).count() : (p - r.start).count()) % divisor) / divisor;}
+
+    template<class TimeRange, class TimePoint>
+    float adjustReverse(TimeRange r, TimePoint p) {
+        size_t divisor = r.duration().count();
+        return ((p < r.finish ? (r.finish - p).count() : (p - r.finish).count()) % divisor) / divisor;}
+
+    template<class TimeRange, class TimePoint>
+    float adjustPingPong(TimeRange r, TimePoint p) {
+        size_t divisor = r.duration().count();
+        return !(((p < r.start ? (r.start - p).count() : (p - r.start).count()) / divisor) %2) ? adjustNone(r, p) : adjustReverse(r, p) ;}
+
+    // used to implement bouncing etc..
+    // in, is a percentage that represents the point in the time_range 
+    typedef std::function<float (float)> ease_type;
+    // called to execute the animation step at time_point as if it was at normalized time factor float
+    typedef std::function<void (animation_state::type, float)> step_type;
+
+    template<class Clock>
+    class time_animation {
+    public:
+        typedef Clock clock;
+        typedef typename clock::duration duration_type;
+        typedef typename clock::time_point time_point;
+        typedef time_range<clock> time_range;
+
+        // used to constrain the run time of the animation
+        typedef std::function<animation_state::type (time_range, time_point)> state_type;
+        // used to implement ping/pong, repeat, etc..
+        // returns a float from 0-1 that represents where in time_range  
+        // the passed in time_point (may not be in time_range) represents.
+        typedef std::function<float (time_range, time_point)> adjust_type;
+        typedef ease_type ease_type;
+        typedef step_type step_type;
+
+        time_animation(duration_type scb, duration_type scd, duration_type u) : 
+            scopeBegin(scb), scopeDuration(scd), update(u), state(runOnce<time_range, time_point>), adjust(adjustNone<time_range, time_point>), ease(easeNone)
+            {}
+        time_animation(duration_type scb, duration_type scd, duration_type u, state_type st) : 
+            scopeBegin(scb), scopeDuration(scd), update(u), state(std::move(st)), adjust(adjustNone<time_range, time_point>), ease(easeNone) 
+            {}
+        time_animation(duration_type scb, duration_type scd, duration_type u, state_type st, ease_type ease) : 
+            scopeBegin(scb), scopeDuration(scd), update(u), state(std::move(st)), adjust(adjustNone<time_range, time_point>), ease(std::move(ease)) 
+            {}
+        time_animation(duration_type scb, duration_type scd, duration_type u, state_type st, adjust_type a) : 
+            scopeBegin(scb), scopeDuration(scd), update(u), state(std::move(st)), adjust(std::move(a)), ease(easeNone)
+            {}
+        time_animation(duration_type scb, duration_type scd, duration_type u, state_type st, adjust_type a, ease_type e) : 
+            scopeBegin(scb), scopeDuration(scd), update(u), state(std::move(st)), adjust(std::move(a)), ease(std::move(e)) 
+            {}
+
+        duration_type scopeBegin;
+        duration_type scopeDuration;
+        duration_type update;
+        state_type state;
+        adjust_type adjust;
+        ease_type ease;
+    };
+
+    template<class Clock>
+    animation_state::type step(time_animation<Clock>& ta, time_range<Clock> sc, step_type& st, typename Clock::time_point t) {
+        auto state = ta.state(sc, t);
+        if (state == animation_state::Pending) {
+            return state;}
+        float time = 0.0f;
+        if (state == animation_state::Running) {
+            time = ta.adjust(sc, t);}
+        else if (state == animation_state::Finished) {
+            time = 1.0f;}
+        st(state, ta.ease(time));
+        return state;
+    }
+
+    template<class Clock>
+    animation_state::type step(time_animation<Clock>& ta, time_range<Clock> sc, step_type& st) {
+        auto now = Clock::now();
+        auto state = ta.state(sc, now);
+        if (state == animation_state::Pending) {
+            return state;}
+        float time = 0.0f;
+        if (state == animation_state::Running) {
+            time = ta.adjust(sc, now);}
+        else if (state == animation_state::Finished) {
+            time = 1.0f;}
+        st(state, ta.ease(time));
+        return state;
+    }
+
+    namespace detail {
+    template<class T, class Indices>
+    struct tuple_insert;
+    template<class T, size_t... DisptachIndices>
+    struct tuple_insert<T, rx::util::tuple_indices<DisptachIndices...>> {
+        const T* t;
+        explicit tuple_insert(const T& targ) : t(&targ) {}
+        template <class charT, class traits>
+        std::basic_ostream<charT,traits>& operator()(std::basic_ostream<charT,traits>& os) const {
+            os << "{";
+            bool out[] = {((os << (DisptachIndices != 0 ? ", " : "") << std::get<DisptachIndices>(*t)), true)...};
+            os << "}";
+            return os;
+        }
+    };}
+
+    template <class charT, class traits, class T, class Indices>
+    std::basic_ostream<charT,traits>& operator<<(std::basic_ostream<charT,traits>& os, const detail::tuple_insert<T, Indices>& ti) {
+        return ti(os);
+    }
+
+    template<class T>
+    auto tuple_insert(const T& t) 
+        -> decltype(detail::tuple_insert<T, typename rx::util::make_tuple_indices<T>::type>(t)) {
+        return      detail::tuple_insert<T, typename rx::util::make_tuple_indices<T>::type>(t);
+    }
+
+    template<class T>
+    struct lerp_value {
+        lerp_value(std::shared_ptr<rx::Observer<T>> o, T i, T f) : initial(std::move(i)), final(std::move(f)), observer(std::move(o)) {}
+        T initial;
+        T final;
+        std::shared_ptr<rx::Observer<T>> observer;
+        void operator()(animation_state::type state, float time) {
+            observer->OnNext(initial + ((final - initial) * time));
+            if (state == animation_state::Finished) {
+                observer->OnCompleted();}
+        }
+    };
+
+    template<class... Value>
+    struct lerp_value<std::tuple<Value...>> {
+        typedef std::tuple<Value...> T;
+        lerp_value(std::shared_ptr<rx::Observer<T>> o, T i, T f) : initial(std::move(i)), final(std::move(f)), observer(std::move(o)) {}
+        lerp_value(std::shared_ptr<rx::Observer<T>> o, Value... i, Value... f)
+            : inital(std::make_tuple(std::move(i)...)), final(std::make_tuple(std::move(f)...)), observer(std::move(o)) {}
+        T initial;
+        T final;
+        std::shared_ptr<rx::Observer<T>> observer;
+        void operator()(animation_state::type state, float time) {
+            rx::DispatchTuple(std::tuple_cat(initial, final), [time, this](Value... initialv, Value... finalv) {
+                T result(static_cast<Value>(initialv + ((finalv - initialv) * time))...);
+#if 0
+                std::wstringstream logmsg;
+                logmsg << L"step - initial: " << tuple_insert(initial) << std::endl; 
+                logmsg << L"step -   final: " << tuple_insert(final) << std::endl; 
+                logmsg << L"step -  result: " << tuple_insert(result) << std::endl; 
+                OutputDebugString(logmsg.str().c_str());
 #endif
+                observer->OnNext(std::move(result));
+            });
+        }
+    };
+
+    template<class T>
+    auto Animate(
+        const std::shared_ptr<rx::Observable<T>>& sourceFinal, 
+        typename rx::Scheduler::shared scheduler,
+        time_animation<typename rx::Scheduler::clock> ta
+        ) 
+        -> std::shared_ptr<rx::Observable<T>> {
+        typedef typename rx::Scheduler::clock clock;
+        typedef time_animation<clock> time_animation;
+        typedef typename time_animation::time_range time_range;
+        typedef typename time_animation::time_point time_point;
+        typedef typename time_animation::step_type step_type;
+        typedef std::pair<time_range, step_type> lerp_value_type;
+        typedef std::vector<std::shared_ptr<lerp_value_type>> lerps_type;
+        typedef typename lerps_type::difference_type difference_type;
+        struct State {
+            State(time_animation ta, time_point lt, time_point nt) : 
+                validDestination(false), animation(std::move(ta)), nextTick(nt) {}
+            std::mutex lock;
+            lerps_type lerps;
+            bool validDestination;
+            T destination;
+            time_animation animation;
+            time_point nextTick;
+        };
+        auto state = std::make_shared<State>(std::move(ta), scheduler->Now(), scheduler->Now());
+        return rx::CreateObservable<T>(
+            [=](const std::shared_ptr<rx::Observer<T>>& observer) -> rx::Disposable {
+                rx::ComposableDisposable cd;
+                rx::SharedDisposable sd;
+                cd.Add(sd);
+                cd.Add(rx::from(sourceFinal)
+                    .subscribe(
+                    // on next
+                        [=](T final) {
+                            time_point nextTick;
+                            bool needSchedule = false;
+                            {
+                                std::unique_lock<std::mutex> guard(state->lock);
+                                if (!state->validDestination) {
+                                    state->validDestination = true; state->destination = final; return;}
+                                auto now = scheduler->Now();
+                                if (!state->lerps.empty()) {
+                                    state->lerps.back().first.finish = now;}
+                                auto start = now + state->animation.scopeBegin;
+                                auto scope = time_range(start, start + state->animation.scopeDuration);
+                                state->lerps.push_back(std::make_shared<lerp_value_type>(
+                                    scope, 
+                                    lerp_value<T>(observer, state->destination, final)));
+                                state->lastTime = scope.finish;
+                                state->destination = final;
+                                if (now > state->nextTick) {
+                                    nextTick = now;
+                                    state->nextTick = nextTick + state->animation.update;
+                                    needSchedule = true;}
+                            }
+                            if (needSchedule) {
+#if 0
+                                {std::wstringstream logmsg;
+                                std::time_t tt = std::chrono::system_clock::to_time_t(nextTick);
+                                logmsg << L"Schedule First Tick: " << std::ctime(&tt) << std::endl; 
+                                OutputDebugString(logmsg.str().c_str());}
+#endif
+                                sd.Set(scheduler->Schedule(
+                                    nextTick,
+                                    rx::fix0([=](rx::Scheduler::shared s, std::function<rx::Disposable(rx::Scheduler::shared)> self) 
+                                        -> rx::Disposable {
+#if 0
+                                        {std::wstringstream logmsg;
+                                        std::time_t tt = std::chrono::system_clock::to_time_t(s->Now());
+                                        logmsg << L"Tick: " << std::ctime(&tt) << std::endl; 
+                                        OutputDebugString(logmsg.str().c_str());}
+#endif
+                                        time_point thisTick;
+                                        time_point nextTick;
+                                        lerps_type lerps;
+                                        {
+                                            std::unique_lock<std::mutex> guard(state->lock);
+                                            lerps = state->lerps;
+                                            thisTick = state->nextTick;
+                                            nextTick = thisTick + state->animation.update;
+                                            state->nextTick = nextTick;
+                                        }
+                                        auto begin = lerps.begin();
+                                        auto cursor = lerps.begin();
+                                        auto end = lerps.end();
+                                        std::vector<difference_type> finished;
+                                        for (;cursor != end; ++cursor) {
+                                            auto& lerp = *cursor;
+                                            auto animState = step(state->animation, lerp->first, lerp->second, thisTick);
+                                            if (animState == animation_state::Finished) {
+                                                finished.push_back(std::distance(begin, cursor));
+                                            }
+                                        }
+                                        {
+                                            std::unique_lock<std::mutex> guard(state->lock);
+                                            std::sort(finished.begin(), finished.end());
+                                            std::for_each(finished.rbegin(), finished.rend(), [state](difference_type offset){
+                                                state->lerps.erase(state->lerps.begin() + offset);});
+                                            if (state->lerps.empty()) {
+                                                sd.Dispose(); return rx::Disposable::Empty();}
+                                            if (state->lerps.front()->first.start > state->nextTick) {
+                                                nextTick = state->lerps.front()->first.start;
+                                                state->nextTick = nextTick;}
+                                        }
+#if 0
+                                        {std::wstringstream logmsg;
+                                        std::time_t tt = std::chrono::system_clock::to_time_t(nextTick);
+                                        logmsg << L"Schedule Next Tick: " << std::ctime(&tt) << std::endl; 
+                                        OutputDebugString(logmsg.str().c_str());}
+#endif
+                                        sd.Set(s->Schedule(nextTick, std::move(self)));
+                                        return rx::Disposable::Empty();
+                                    })));
+                            }
+                        },
+                    // on completed
+                        [=](){
+                            observer->OnCompleted();
+                            cd.Dispose();
+                        }, 
+                    // on error
+                        [=](const std::exception_ptr& e){
+                            observer->OnError(e);
+                            cd.Dispose();
+                    }));
+                return cd;
+            });
+    }
+
+    struct animate {};
+    template<class T>
+    auto rxcpp_chain(animate&&, 
+        const std::shared_ptr<rx::Observable<T>>& sourceFinal, 
+        typename rx::Scheduler::shared scheduler,
+        time_animation<typename rx::Scheduler::clock> ta
+        ) 
+        -> decltype(Animate(sourceFinal, scheduler, ta)) {
+        return      Animate(sourceFinal, scheduler, ta);
+    }
+}
+using rxanim::rxcpp_chain;
 
 bool operator==(POINT lhs, POINT rhs)
 {
@@ -857,6 +1277,13 @@ namespace RootWindow
     struct window
     {
         typedef rxmsg::window_measure<rxmsg::traits::Default> top_measure;
+        typedef rx::Scheduler::clock clock;
+        typedef rxanim::time_animation<clock> time_animation;
+        typedef time_animation::state_type state_type;
+        typedef time_animation::time_range time_range;
+        typedef time_animation::time_point time_point;
+        typedef time_animation::duration_type time_duration;
+
         window(HWND handle, CREATESTRUCT& cs)
             : root(handle)
             , exceptions(reinterpret_cast<Exceptions*>(cs.lpCreateParams))
@@ -871,25 +1298,37 @@ namespace RootWindow
             auto mainFormScheduler = std::make_shared<rx::win32::WindowScheduler>();
 
             auto rootMeasurement = rx::from(messages)
-                .chain<top_measure::select_client_measurement>();
-
-            rx::from(rootMeasurement)
+                .chain<top_measure::select_client_measurement>()
                 .distinct_until_changed()
-                // delay on worker thread
-                .delay(std::chrono::milliseconds(300), worker)
+                .publish();
+
+            auto editBounds = rx::from(rootMeasurement)
+                .select([](top_measure::Measurement m){
+                    return std::make_tuple(m.left.c, m.top.c, m.width().c);})
+                .publish();
+
+            rx::from(editBounds)
+                // set the initial value
+                .select([](std::tuple<int, int, int>){return std::make_tuple(0,0,0);})
+                .take(1)
+                // merge the values to animate to
+                .merge(editBounds)
+                .chain<rxanim::animate>(
+                    worker, 
+                    time_animation(
+                        std::chrono::milliseconds(0), std::chrono::milliseconds(500), std::chrono::milliseconds(50), 
+                        state_type(rxanim::runOnce<time_range, time_point>), rxanim::ease_type(rxanim::easeSquareRoot)))
                 .observe_on(mainFormScheduler)
                 .subscribe(
-                    [this](top_measure::Measurement m){
-                        SetWindowPos(edit.get(), nullptr, m.left.c, m.top.c, m.width().c, 30, SWP_NOOWNERZORDER);
+                    rx::MakeTupleDispatch([this](int left, int top, int width){
+                        SetWindowPos(edit.get(), nullptr, left, top, width, 30, SWP_NOOWNERZORDER);
                         InvalidateRect(edit.get(), nullptr, true);
-                    });
+                    }));
 
             auto commands = rx::from(messages)
-                .where(rxmsg::messageId<WM_COMMAND>())
-                .select([this](const rxmsg::message& m){
-                    // expands to:
-                    // return HANDLE_WM_COMMAND(m.window, m.wParam, m.lParam, rxmsg::HandleMessage(m));
-                    return RXCPP_HANDLE_MESSAGE(WM_COMMAND, m);})
+                .where(rxmsg::messageId<rxmsg::wm::command>())
+                .select([](const rxmsg::message& msg){
+                    return rxmsg::handle_message<rxmsg::wm::command>(msg);})
                 .publish();
 
             // edit text changed
@@ -914,7 +1353,7 @@ namespace RootWindow
 
             // post quit message
             rx::from(messages)
-                .where(rxmsg::messageId<WM_NCDESTROY>())
+                .where(rxmsg::messageId<rxmsg::wm::ncdestroy>())
                 .subscribe([this](const rxmsg::message& m){
                     set_handled(m);
                     cd.Dispose();
@@ -923,21 +1362,17 @@ namespace RootWindow
 
             // print client
             rx::from(messages)
-                .where(rxmsg::messageId<WM_PRINTCLIENT>())
-                .select([](const rxmsg::message& m) {
-                    return std::make_tuple(m.window, reinterpret_cast<HDC>(m.wParam), m.out);})
+                .where(rxmsg::messageId<rxmsg::wm::printclient>())
+                .select([](const rxmsg::message& msg){
+                    return rxmsg::handle_message<rxmsg::wm::printclient>(msg);})
                 .subscribe(
                 //on next
-                    [this](const std::tuple<HWND, HDC, l::wnd::dispatch_result*>& m){
-                        rxmsg::set_handled(std::get<2>(m));
+                    rxcpp::MakeTupleDispatch([this](HDC hdc, UINT, rxmsg::message m){
                         PAINTSTRUCT ps = {};
-                        ps.hdc = std::get<1>(m);
-                        GetClientRect(std::get<0>(m), &ps.rcPaint);
-                        rxmsg::set_lResult(
-                            std::get<2>(m),
-                            this->PaintContent(ps)
-                        );
-                    },
+                        ps.hdc = hdc;
+                        GetClientRect(m.window, &ps.rcPaint);
+                        rxmsg::set_lResult(m, this->PaintContent(ps));
+                    }),
                 // on completed
                     [](){},
                 //on error
@@ -946,7 +1381,7 @@ namespace RootWindow
 
             // paint
             rx::from(messages)
-                .where(rxmsg::messageId<WM_PAINT>())
+                .where(rxmsg::messageId<rxmsg::wm::paint>())
                 .subscribe(
                 // on next
                     [this](const rxmsg::message& m){
@@ -954,10 +1389,7 @@ namespace RootWindow
                         PAINTSTRUCT ps = {};
                         BeginPaint(m.window, &ps);
                         l::wr::unique_gdi_end_paint ender(std::make_pair(m.window, &ps));
-                        set_lResult(
-                            m,
-                            this->PaintContent(ps)
-                        );
+                        rxmsg::set_lResult(m, this->PaintContent(ps));
                     },
                 // on completed
                     [](){},
@@ -967,18 +1399,18 @@ namespace RootWindow
 
             // disable erase background
             rx::from(messages)
-                .where(rxmsg::messageId<WM_ERASEBKGND>())
+                .where(rxmsg::messageId<rxmsg::wm::erasebkgnd>())
                 .subscribe([this](const rxmsg::message& m){
                     set_handled(m);
                     set_lResult(m,TRUE);
                 });
 
             auto mouseDown = rx::from(messages)
-                .where(rxmsg::messageId<WM_LBUTTONDOWN>())
+                .where(rxmsg::messageId<rxmsg::wm::lbuttondown>())
                 .publish();
 
             auto mouseUp = rx::from(messages)
-                .where(rxmsg::messageId<WM_LBUTTONUP>())
+                .where(rxmsg::messageId<rxmsg::wm::lbuttonup>())
                 .publish();
 
             // note: distinct_until_changed is necessary; while 
@@ -991,11 +1423,9 @@ namespace RootWindow
                 .select_many([=, this](const rxmsg::message&) {
                     return rx::from(messages)
                         .take_until(mouseUp)
-                        .where(rxmsg::messageId<WM_MOUSEMOVE>())
-                        .select([this](const rxmsg::message& m) {
-                            // expands to:
-                            // return HANDLE_WM_MOUSEMOVE(m.window, m.wParam, m.lParam, rxmsg::HandleMessage());
-                            return RXCPP_CRACK_MESSAGE(WM_MOUSEMOVE, m);})
+                        .where(rxmsg::messageId<rxmsg::wm::mousemove>())
+                        .select([](const rxmsg::message& msg){
+                            return rxmsg::handle_message<rxmsg::wm::mousemove>(msg);})
                         .distinct_until_changed()
                         .publish();})
                 .subscribe(rxcpp::MakeTupleDispatch([=](int x, int y, UINT, const rxmsg::message&) {
@@ -1010,11 +1440,13 @@ namespace RootWindow
                         cd.Dispose();
                         labels.clear();
                         maxHeight = 0;
+                        int relativeX = 0;
 
                         auto point = rx::from(mousePoint)
                             // make the text appear above the mouse location
                             .select([this](top_measure::Point p){
-                                p.p.y -= maxHeight; return p;});
+                                p.p.y -= maxHeight; return std::tuple<int, int>(p.p.x, p.p.y);})
+                            .publish();
 
                         for (int i = 0; msg[i]; ++i)
                         {
@@ -1026,20 +1458,20 @@ namespace RootWindow
 
                             rx::from(point)
                                 .distinct_until_changed()
-                                // delay on worker thread
-                                .delay(std::chrono::milliseconds(100), worker)
+                                .chain<rxanim::animate>(
+                                    worker, 
+                                    time_animation(
+                                        std::chrono::milliseconds(300 * i), std::chrono::milliseconds(900), std::chrono::milliseconds(50),
+                                        state_type(rxanim::runOnce<time_range, time_point>), rxanim::ease_type(rxanim::easeSquareRoot)))
                                 .observe_on(mainFormScheduler)
-                                .subscribe([&charlabel, labelMeasurement](top_measure::Point p){
-                                    SetWindowPos(charlabel.window.get(), nullptr, p.p.x, std::max(30L, p.p.y), labelMeasurement.width().c, labelMeasurement.height().c, SWP_NOOWNERZORDER);
-                                    InvalidateRect(charlabel.window.get(), nullptr, true);
-                                    UpdateWindow(charlabel.window.get());
-                                });
+                                .subscribe(rx::MakeTupleDispatch(
+                                    [&charlabel, labelMeasurement, relativeX](int x, int y) {
+                                        SetWindowPos(charlabel.window.get(), nullptr, x + relativeX, std::max(30, y), labelMeasurement.width().c, labelMeasurement.height().c, SWP_NOOWNERZORDER);
+                                        InvalidateRect(charlabel.window.get(), nullptr, true);
+                                        UpdateWindow(charlabel.window.get());
+                                    }));
 
-                            point = rx::from(charlabel.messages)
-                                .chain<top_measure::select_parent_measurement>()
-                                // put the next char at the right - top of this char
-                                .select([](top_measure::Measurement m){
-                                    return top_measure::Point(m.right, m.top);});
+                            relativeX += labelMeasurement.width().c;
                         }
                     },
                 // on completed
@@ -1048,7 +1480,8 @@ namespace RootWindow
                     [this](const std::exception_ptr& e){
                         exceptions->push(std::make_pair("error in label onmove stream: ", e));});
 
-            auto msg = L"Time flies like an arrow";
+            //auto msg = L"Time flies like an arrow";
+            auto msg = L"Hello";
             Edit_SetText(edit.get(), msg);
             text->OnNext(msg);
         }
