@@ -1095,13 +1095,12 @@ namespace rxanim {
                                     state->validDestination = true; state->destination = final; return;}
                                 auto now = scheduler->Now();
                                 if (!state->lerps.empty()) {
-                                    state->lerps.back().first.finish = now;}
+                                    state->lerps.back()->first.finish = now;}
                                 auto start = now + state->animation.scopeBegin;
                                 auto scope = time_range(start, start + state->animation.scopeDuration);
                                 state->lerps.push_back(std::make_shared<lerp_value_type>(
                                     scope, 
                                     lerp_value<T>(observer, state->destination, final)));
-                                state->lastTime = scope.finish;
                                 state->destination = final;
                                 if (now > state->nextTick) {
                                     nextTick = now;
@@ -1461,7 +1460,7 @@ namespace RootWindow
                                 .chain<rxanim::animate>(
                                     worker, 
                                     time_animation(
-                                        std::chrono::milliseconds(300 * i), std::chrono::milliseconds(900), std::chrono::milliseconds(50),
+                                        std::chrono::milliseconds(100 * i), std::chrono::milliseconds(100), std::chrono::milliseconds(50),
                                         state_type(rxanim::runOnce<time_range, time_point>), rxanim::ease_type(rxanim::easeSquareRoot)))
                                 .observe_on(mainFormScheduler)
                                 .subscribe(rx::MakeTupleDispatch(
@@ -1480,8 +1479,8 @@ namespace RootWindow
                     [this](const std::exception_ptr& e){
                         exceptions->push(std::make_pair("error in label onmove stream: ", e));});
 
-            //auto msg = L"Time flies like an arrow";
-            auto msg = L"Hello";
+            auto msg = L"Time flies like an arrow";
+            //auto msg = L"Hello";
             Edit_SetText(edit.get(), msg);
             text->OnNext(msg);
         }
