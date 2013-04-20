@@ -935,24 +935,22 @@ namespace rxanim {
         typedef ease_type ease_type;
         typedef step_type step_type;
 
-        time_animation(duration_type scb, duration_type scd, duration_type u) : 
-            scopeBegin(scb), scopeDuration(scd), update(u), state(runOnce<time_range, time_point>), adjust(adjustNone<time_range, time_point>), ease(easeNone)
+        time_animation(duration_type u) : 
+            update(u), state(runOnce<time_range, time_point>), adjust(adjustNone<time_range, time_point>), ease(easeNone)
             {}
-        time_animation(duration_type scb, duration_type scd, duration_type u, state_type st) : 
-            scopeBegin(scb), scopeDuration(scd), update(u), state(std::move(st)), adjust(adjustNone<time_range, time_point>), ease(easeNone) 
+        time_animation(duration_type u, state_type st) : 
+            update(u), state(std::move(st)), adjust(adjustNone<time_range, time_point>), ease(easeNone) 
             {}
-        time_animation(duration_type scb, duration_type scd, duration_type u, state_type st, ease_type ease) : 
-            scopeBegin(scb), scopeDuration(scd), update(u), state(std::move(st)), adjust(adjustNone<time_range, time_point>), ease(std::move(ease)) 
+        time_animation(duration_type u, state_type st, ease_type ease) : 
+            update(u), state(std::move(st)), adjust(adjustNone<time_range, time_point>), ease(std::move(ease)) 
             {}
-        time_animation(duration_type scb, duration_type scd, duration_type u, state_type st, adjust_type a) : 
-            scopeBegin(scb), scopeDuration(scd), update(u), state(std::move(st)), adjust(std::move(a)), ease(easeNone)
+        time_animation(duration_type u, state_type st, adjust_type a) : 
+            update(u), state(std::move(st)), adjust(std::move(a)), ease(easeNone)
             {}
-        time_animation(duration_type scb, duration_type scd, duration_type u, state_type st, adjust_type a, ease_type e) : 
-            scopeBegin(scb), scopeDuration(scd), update(u), state(std::move(st)), adjust(std::move(a)), ease(std::move(e)) 
+        time_animation(duration_type u, state_type st, adjust_type a, ease_type e) : 
+            update(u), state(std::move(st)), adjust(std::move(a)), ease(std::move(e)) 
             {}
 
-        duration_type scopeBegin;
-        duration_type scopeDuration;
         duration_type update;
         state_type state;
         adjust_type adjust;
@@ -1052,11 +1050,12 @@ namespace rxanim {
         }
     };
 
-    template<class T>
+    template<class T, class TimeSelector>
     auto Animate(
         const std::shared_ptr<rx::Observable<T>>& sourceFinal, 
-        typename rx::Scheduler::shared scheduler,
-        time_animation<typename rx::Scheduler::clock> ta
+        TimeSelector timeSelector, 
+        time_animation<typename rx::Scheduler::clock> ta,
+        typename rx::Scheduler::shared scheduler
         ) 
         -> std::shared_ptr<rx::Observable<T>> {
         typedef typename rx::Scheduler::clock clock;
@@ -1064,21 +1063,20 @@ namespace rxanim {
         typedef typename time_animation::time_range time_range;
         typedef typename time_animation::time_point time_point;
         typedef typename time_animation::step_type step_type;
-        typedef std::pair<time_range, step_type> lerp_value_type;
+        typedef std::pair<time_range, lerp_value<T>> lerp_value_type;
         typedef std::vector<std::shared_ptr<lerp_value_type>> lerps_type;
         typedef typename lerps_type::difference_type difference_type;
         struct State {
             State(time_animation ta, time_point lt, time_point nt) : 
-                validDestination(false), animation(std::move(ta)), nextTick(nt) {}
+                animation(std::move(ta)), nextTick(nt) {}
             std::mutex lock;
             lerps_type lerps;
-            bool validDestination;
-            T destination;
             time_animation animation;
             time_point nextTick;
         };
         auto state = std::make_shared<State>(std::move(ta), scheduler->Now(), scheduler->Now());
         return rx::CreateObservable<T>(
+        // subscribe
             [=](const std::shared_ptr<rx::Observer<T>>& observer) -> rx::Disposable {
                 rx::ComposableDisposable cd;
                 rx::SharedDisposable sd;
@@ -1089,23 +1087,23 @@ namespace rxanim {
                         [=](T final) {
                             time_point nextTick;
                             bool needSchedule = false;
+                            auto now = scheduler->Now();
+                            auto finish = timeSelector(now, final);
                             {
                                 std::unique_lock<std::mutex> guard(state->lock);
-                                if (!state->validDestination) {
-                                    state->validDestination = true; state->destination = final; return;}
-                                auto now = scheduler->Now();
+                                auto start = now;
+                                auto initial = final;
                                 if (!state->lerps.empty()) {
-                                    state->lerps.back()->first.finish = now;}
-                                auto start = now + state->animation.scopeBegin;
-                                auto scope = time_range(start, start + state->animation.scopeDuration);
-                                state->lerps.push_back(std::make_shared<lerp_value_type>(
-                                    scope, 
-                                    lerp_value<T>(observer, state->destination, final)));
-                                state->destination = final;
-                                if (now > state->nextTick) {
-                                    nextTick = now;
+                                    start = state->lerps.back()->first.finish;
+                                    initial = state->lerps.back()->second.final;}
+                                auto scope = time_range(start, finish);
+                                if (start < state->nextTick || state->lerps.empty()) {
+                                    nextTick = start;
                                     state->nextTick = nextTick + state->animation.update;
                                     needSchedule = true;}
+                                state->lerps.push_back(std::make_shared<lerp_value_type>(
+                                    scope, 
+                                    lerp_value<T>(observer, initial, final)));
                             }
                             if (needSchedule) {
 #if 0
@@ -1140,7 +1138,7 @@ namespace rxanim {
                                         std::vector<difference_type> finished;
                                         for (;cursor != end; ++cursor) {
                                             auto& lerp = *cursor;
-                                            auto animState = step(state->animation, lerp->first, lerp->second, thisTick);
+                                            auto animState = step(state->animation, lerp->first, step_type(lerp->second), thisTick);
                                             if (animState == animation_state::Finished) {
                                                 finished.push_back(std::distance(begin, cursor));
                                             }
@@ -1182,14 +1180,15 @@ namespace rxanim {
     }
 
     struct animate {};
-    template<class T>
+    template<class T, class TimeSelector>
     auto rxcpp_chain(animate&&, 
         const std::shared_ptr<rx::Observable<T>>& sourceFinal, 
-        typename rx::Scheduler::shared scheduler,
-        time_animation<typename rx::Scheduler::clock> ta
+        TimeSelector timeSelector, 
+        time_animation<typename rx::Scheduler::clock> ta,
+        typename rx::Scheduler::shared scheduler
         ) 
-        -> decltype(Animate(sourceFinal, scheduler, ta)) {
-        return      Animate(sourceFinal, scheduler, ta);
+        -> decltype(Animate(sourceFinal, timeSelector, ta, scheduler)) {
+        return      Animate(sourceFinal, timeSelector, ta, scheduler);
     }
 }
 using rxanim::rxcpp_chain;
@@ -1306,6 +1305,11 @@ namespace RootWindow
                     return std::make_tuple(m.left.c, m.top.c, m.width().c);})
                 .publish();
 
+            auto ta = time_animation(
+                std::chrono::milliseconds(30),
+                state_type(rxanim::runOnce<time_range, time_point>), 
+                rxanim::ease_type(rxanim::easeSquareRoot));
+
             rx::from(editBounds)
                 // set the initial value
                 .select([](std::tuple<int, int, int>){return std::make_tuple(0,0,0);})
@@ -1313,10 +1317,10 @@ namespace RootWindow
                 // merge the values to animate to
                 .merge(editBounds)
                 .chain<rxanim::animate>(
-                    worker, 
-                    time_animation(
-                        std::chrono::milliseconds(0), std::chrono::milliseconds(500), std::chrono::milliseconds(50), 
-                        state_type(rxanim::runOnce<time_range, time_point>), rxanim::ease_type(rxanim::easeSquareRoot)))
+                    [](time_point now, const std::tuple<int, int, int>&){
+                        return now + std::chrono::milliseconds(500);},
+                    ta,
+                    worker)
                 .observe_on(mainFormScheduler)
                 .subscribe(
                     rx::MakeTupleDispatch([this](int left, int top, int width){
@@ -1458,10 +1462,10 @@ namespace RootWindow
                             rx::from(point)
                                 .distinct_until_changed()
                                 .chain<rxanim::animate>(
-                                    worker, 
-                                    time_animation(
-                                        std::chrono::milliseconds(100 * i), std::chrono::milliseconds(100), std::chrono::milliseconds(50),
-                                        state_type(rxanim::runOnce<time_range, time_point>), rxanim::ease_type(rxanim::easeSquareRoot)))
+                                    [=](time_point now, const std::tuple<int, int>&){
+                                        return now + std::chrono::milliseconds(100 * i);},
+                                    ta,
+                                    worker)
                                 .observe_on(mainFormScheduler)
                                 .subscribe(rx::MakeTupleDispatch(
                                     [&charlabel, labelMeasurement, relativeX](int x, int y) {
