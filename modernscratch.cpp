@@ -23,10 +23,12 @@
 #pragma comment(linker,"\"/manifestdependency:type='win32' name='Microsoft.Windows.Common-Controls' version='6.0.0.0' processorArchitecture='*' publicKeyToken='6595b64144ccf1df' language='*'\"")
 
 #include <iostream>
+#include <iomanip>
 #include <sstream>
 #include <chrono>
 #include <ctime>
 
+#include <cmath>
 #include <new>
 #include <utility>
 #include <memory>
@@ -805,7 +807,7 @@ public:
     }
 
     HWND window;
-    rx::SharedDisposable themechanged;
+    rx::SerialDisposable themechanged;
     std::wstring classId;
     typename Message::Observable messages;
     l::wr::unique_theme_data handle;
@@ -876,9 +878,28 @@ namespace rxanim {
     float easeNone(float t) {return t;}
     float easeSquare(float t) {return t*t;}
     float easeSquareRoot(float t) {return sqrt(t);}
+    template<int Num, int Den = 1>
+    float easePow(float t) {return pow(t, Num/Den);}
+    template<int Den>
+    float easeRoot(float t) {return pow(t, 1/Den);}
+    float easeElasticDamp(float t) {
+        return 1.0f - pow(2, -10 * t) * sin(4 * 3.14 * (t+3.14));}
+    float easeElasticAmp(float t) {
+        return pow(2, 10 * (t - 1)) * sin(4 * 3.14 * (t+3.14));}
+    float easeBounceDamp(float t) {
+        if (t < .27) {
+            return (4*3.14*t*t);}
+        else if (t < .71) {
+            return (4*3.14*(t-.5)*(t-.5))+.4;}
+        else if (t < .89) {
+            return (4*3.14*(t-.8)*(t-.8))+.92;}
+        else {
+            return (4*3.14*(t-.94)*(t-.94))+.97;}}
+    float easeBounceAmp(float t) {
+        return 1.0f - easeBounceDamp(t);}
 
     struct animation_state {
-        enum type {Pending, Running, Finished};
+        enum type {Invalid, Pending, Running, Finished};
     };
 
     template<class TimeRange, class TimePoint>
@@ -893,24 +914,56 @@ namespace rxanim {
     template<size_t N, class TimeRange, class TimePoint>
     animation_state::type runN(TimeRange r, TimePoint p) {
         TimeRange full = r;
-        r.finish = r.start + r.duration() * N;
+        full.finish = r.start + (r.duration() * N);
         return runOnce(full, p);
     }
 
     template<class TimeRange, class TimePoint>
     float adjustNone(TimeRange r, TimePoint p) {
-        size_t divisor = r.duration().count();
-        return ((p < r.start ? (r.start - p).count() : (p - r.start).count()) % divisor) / divisor;}
+        size_t den = r.duration().count();
+        size_t num = (p - r.start).count();
+#if 0
+        std::wstringstream logmsg;
+        std::time_t tt = std::chrono::system_clock::to_time_t(p);
+        logmsg << L"adjust  time: " << std::ctime(&tt); 
+        tt = std::chrono::system_clock::to_time_t(r.start);
+        logmsg << L"       start: " << std::ctime(&tt); 
+        tt = std::chrono::system_clock::to_time_t(r.finish);
+        logmsg << L"      finish: " << std::ctime(&tt); 
+        logmsg << L"   numerator: " << num << std::endl; 
+        logmsg << L" denominator: " << den << std::endl; 
+        logmsg << L"       place: " << (num%den) << std::endl; 
+        logmsg << L"   iteration: " << (num/den) << std::endl; 
+        logmsg << L"  normalized: " << (static_cast<float>(num%den)/den) << std::endl; 
+        OutputDebugString(logmsg.str().c_str());
+#endif
+        return static_cast<float>(num%den) / den;}
 
     template<class TimeRange, class TimePoint>
     float adjustReverse(TimeRange r, TimePoint p) {
-        size_t divisor = r.duration().count();
-        return ((p < r.finish ? (r.finish - p).count() : (p - r.finish).count()) % divisor) / divisor;}
+        return 1.0f - adjustNone(r, p);}
 
     template<class TimeRange, class TimePoint>
     float adjustPingPong(TimeRange r, TimePoint p) {
-        size_t divisor = r.duration().count();
-        return !(((p < r.start ? (r.start - p).count() : (p - r.start).count()) / divisor) %2) ? adjustNone(r, p) : adjustReverse(r, p) ;}
+        size_t den = r.duration().count();
+        size_t num = (p - r.start).count();
+        float none = adjustNone(r, p);
+#if 0
+        std::wstringstream logmsg;
+        std::time_t tt = std::chrono::system_clock::to_time_t(p);
+        logmsg << L"pingpong time: " << std::ctime(&tt); 
+        tt = std::chrono::system_clock::to_time_t(r.start);
+        logmsg << L"        start: " << std::ctime(&tt); 
+        tt = std::chrono::system_clock::to_time_t(r.finish);
+        logmsg << L"       finish: " << std::ctime(&tt);
+        logmsg << L"    numerator: " << num << std::endl; 
+        logmsg << L"  denominator: " << den << std::endl; 
+        logmsg << L"        place: " << (num%den) << std::endl; 
+        logmsg << L"    iteration: " << (num/den) << std::endl; 
+        logmsg << L"   normalized: " << (static_cast<float>(num%den)/den) << std::endl; 
+        OutputDebugString(logmsg.str().c_str());
+#endif
+        return 0==(static_cast<size_t>(num/den) % 2) ? none : 1.0f - none;}
 
     // used to implement bouncing etc..
     // in, is a percentage that represents the point in the time_range 
@@ -958,31 +1011,82 @@ namespace rxanim {
     };
 
     template<class Clock>
-    animation_state::type step(time_animation<Clock>& ta, time_range<Clock> sc, step_type& st, typename Clock::time_point t) {
+    animation_state::type step(time_animation<Clock>& ta, time_range<Clock> sc, time_range<Clock> sc_st, step_type& st, typename Clock::time_point t) {
         auto state = ta.state(sc, t);
         if (state == animation_state::Pending) {
             return state;}
         float time = 0.0f;
         if (state == animation_state::Running) {
-            time = ta.adjust(sc, t);}
+            auto sc_time = ta.ease(ta.adjust(sc, t));
+            auto sc_timepoint = sc.start + std::chrono::duration_cast<std::chrono::milliseconds>(sc.duration() * sc_time);
+            if (!sc_st.contains(sc_timepoint)) {return animation_state::Pending;}
+            time = (sc_timepoint - sc_st.start).count() / (sc_st.finish - sc_st.start).count();}
         else if (state == animation_state::Finished) {
             time = 1.0f;}
-        st(state, ta.ease(time));
+        st(state, time);
+#if 0
+        size_t den = sc.duration().count();
+        size_t num = (t - sc.start).count();
+        std::wstringstream logmsg;
+        std::time_t tt = std::chrono::system_clock::to_time_t(t);
+        logmsg << L"step      time: " << std::ctime(&tt); 
+        tt = std::chrono::system_clock::to_time_t(sc.start);
+        logmsg << L"         start: " << std::ctime(&tt); 
+        tt = std::chrono::system_clock::to_time_t(sc.finish);
+        logmsg << L"        finish: " << std::ctime(&tt); 
+        logmsg << L"         state: " << (state == animation_state::Pending ? "Pending" : 
+                                       (state == animation_state::Running ? "Running" : 
+                                       (state == animation_state::Finished ? "Finished" : "Unknown"))) << std::endl; 
+        logmsg << L"     numerator: " << num << std::endl; 
+        logmsg << L"   denominator: " << den << std::endl; 
+        if (den != 0) {
+            logmsg << L"         place: " << (num%den) << std::endl; 
+            logmsg << L"     iteration: " << (num/den) << std::endl; 
+            logmsg << L"    normalized: " << (static_cast<float>(num%den)/den) << std::endl;}
+        logmsg << L"        result: " << time << std::endl; 
+        OutputDebugString(logmsg.str().c_str());
+#endif
         return state;
     }
 
     template<class Clock>
-    animation_state::type step(time_animation<Clock>& ta, time_range<Clock> sc, step_type& st) {
-        auto now = Clock::now();
-        auto state = ta.state(sc, now);
+    animation_state::type step(time_animation<Clock>& ta, time_range<Clock> sc, time_range<Clock> sc_st, step_type& st) {
+        auto t = Clock::now();
+        if (!sc_st.contains(t)) {return animation_state::Pending;}
+        auto state = ta.state(sc, t);
         if (state == animation_state::Pending) {
             return state;}
         float time = 0.0f;
         if (state == animation_state::Running) {
-            time = ta.adjust(sc, now);}
+            auto sc_time = ta.ease(ta.adjust(sc, t));
+            auto sc_timepoint = sc.start + std::chrono::duration_cast<std::chrono::milliseconds>(sc.duration() * sc_time);
+            if (!sc_st.contains(sc_timepoint)) {return animation_state::Pending;}
+            time = (sc_timepoint - sc_st.start).count() / (sc_st.finish - sc_st.start).count();}
         else if (state == animation_state::Finished) {
             time = 1.0f;}
-        st(state, ta.ease(time));
+        st(state, time);
+#if 0
+        size_t den = sc.duration().count();
+        size_t num = (t - sc.start).count();
+        std::wstringstream logmsg;
+        std::time_t tt = std::chrono::system_clock::to_time_t(t);
+        logmsg << L"step(now) time: " << std::ctime(&tt); 
+        tt = std::chrono::system_clock::to_time_t(sc.start);
+        logmsg << L"         start: " << std::ctime(&tt); 
+        tt = std::chrono::system_clock::to_time_t(sc.finish);
+        logmsg << L"        finish: " << std::ctime(&tt); 
+        logmsg << L"         state: " << (state == animation_state::Pending ? "Pending" : 
+                                       (state == animation_state::Running ? "Running" : 
+                                       (state == animation_state::Finished ? "Finished" : "Unknown"))) << std::endl; 
+        logmsg << L"     numerator: " << num << std::endl; 
+        logmsg << L"   denominator: " << den << std::endl; 
+        if (den != 0) {
+            logmsg << L"         place: " << (num%den) << std::endl; 
+            logmsg << L"     iteration: " << (num/den) << std::endl; 
+            logmsg << L"    normalized: " << (static_cast<float>(num%den)/den) << std::endl;}
+        logmsg << L"        result: " << time << std::endl; 
+        OutputDebugString(logmsg.str().c_str());
+#endif
         return state;
     }
 
@@ -1011,6 +1115,35 @@ namespace rxanim {
     auto tuple_insert(const T& t) 
         -> decltype(detail::tuple_insert<T, typename rx::util::make_tuple_indices<T>::type>(t)) {
         return      detail::tuple_insert<T, typename rx::util::make_tuple_indices<T>::type>(t);
+    }
+
+
+    namespace detail {
+    template<class T>
+    struct time_insert {
+        const T* t;
+        explicit time_insert(const T& targ) : t(&targ) {}
+        template <class charT, class traits>
+        std::basic_ostream<charT,traits>& operator()(std::basic_ostream<charT,traits>& os) const {
+            auto tt = std::chrono::system_clock::to_time_t(*t);
+            auto tm = std::localtime(&tt);
+            std::chrono::duration<double> fraq = *t - 
+                                            std::chrono::system_clock::from_time_t(tt) +
+                                            std::chrono::seconds(tm->tm_sec);
+            os << std::put_time(tm, L"%H:%M:%S.") << fraq.count(); 
+            return os;
+        }
+    };}
+
+    template <class charT, class traits, class T>
+    std::basic_ostream<charT,traits>& operator<<(std::basic_ostream<charT,traits>& os, const detail::time_insert<T>& ti) {
+        return ti(os);
+    }
+
+    template<class T>
+    auto time_insert(const T& t) 
+        -> decltype(detail::time_insert<T>(t)) {
+        return      detail::time_insert<T>(t);
     }
 
     template<class T>
@@ -1053,116 +1186,128 @@ namespace rxanim {
     template<class T, class TimeSelector>
     auto Animate(
         const std::shared_ptr<rx::Observable<T>>& sourceFinal, 
-        TimeSelector timeSelector, 
+        const std::shared_ptr<rx::Observable<typename rx::Scheduler::clock::time_point>>& sourceInterval, 
         time_animation<typename rx::Scheduler::clock> ta,
-        typename rx::Scheduler::shared scheduler
+        TimeSelector timeSelector 
         ) 
         -> std::shared_ptr<rx::Observable<T>> {
         typedef typename rx::Scheduler::clock clock;
         typedef time_animation<clock> time_animation;
         typedef typename time_animation::time_range time_range;
         typedef typename time_animation::time_point time_point;
+        typedef typename time_animation::duration_type time_duration;
         typedef typename time_animation::step_type step_type;
         typedef std::pair<time_range, lerp_value<T>> lerp_value_type;
         typedef std::vector<std::shared_ptr<lerp_value_type>> lerps_type;
         typedef typename lerps_type::difference_type difference_type;
-        struct State {
-            State(time_animation ta, time_point lt, time_point nt) : 
-                animation(std::move(ta)), nextTick(nt) {}
-            std::mutex lock;
-            lerps_type lerps;
-            time_animation animation;
-            time_point nextTick;
-        };
-        auto state = std::make_shared<State>(std::move(ta), scheduler->Now(), scheduler->Now());
         return rx::CreateObservable<T>(
         // subscribe
-            [=](const std::shared_ptr<rx::Observer<T>>& observer) -> rx::Disposable {
+            [=](const std::shared_ptr<rx::Observer<T>>& observer) 
+                -> rx::Disposable {
+                struct State {
+                    State(time_animation ta) : 
+                        animation(std::move(ta)) {}
+                    std::mutex lock;
+                    lerps_type lerps;
+                    time_animation animation;
+                };
+                auto state = std::make_shared<State>(ta);
                 rx::ComposableDisposable cd;
-                rx::SharedDisposable sd;
-                cd.Add(sd);
+#if 1
                 cd.Add(rx::from(sourceFinal)
                     .subscribe(
                     // on next
                         [=](T final) {
-                            time_point nextTick;
-                            bool needSchedule = false;
-                            auto now = scheduler->Now();
+                            auto now = clock::now();
                             auto finish = timeSelector(now, final);
+
+                            std::unique_lock<std::mutex> guard(state->lock);
+
+                            auto start = now;
+                            auto initial = final;
+
+                            if (!state->lerps.empty()) {
+                                start = state->lerps.back()->first.finish;
+                                initial = state->lerps.back()->second.final;}
+
+                            auto scope = time_range(start, finish);
+
+                            state->lerps.push_back(std::make_shared<lerp_value_type>(
+                                scope, 
+                                lerp_value<T>(observer, initial, final)));
+                        },
+                    // on completed
+                        [=](){
+                            observer->OnCompleted();
+                            cd.Dispose();
+                        }, 
+                    // on error
+                        [=](const std::exception_ptr& e){
+                            observer->OnError(e);
+                            cd.Dispose();
+                    }));
+
+                cd.Add(rx::from(sourceInterval)
+                    .subscribe(
+                    // on next
+                        [=](time_point thisTick) {
+#if 0
+                            {std::wstringstream logmsg;
+                            std::time_t tt = std::chrono::system_clock::to_time_t(thisTick);
+                            logmsg << L"Tick: " << std::ctime(&tt) << std::endl; 
+                            OutputDebugString(logmsg.str().c_str());}
+#endif
+                            lerps_type lerps;
                             {
                                 std::unique_lock<std::mutex> guard(state->lock);
-                                auto start = now;
-                                auto initial = final;
-                                if (!state->lerps.empty()) {
-                                    start = state->lerps.back()->first.finish;
-                                    initial = state->lerps.back()->second.final;}
-                                auto scope = time_range(start, finish);
-                                if (start < state->nextTick || state->lerps.empty()) {
-                                    nextTick = start;
-                                    state->nextTick = nextTick + state->animation.update;
-                                    needSchedule = true;}
-                                state->lerps.push_back(std::make_shared<lerp_value_type>(
-                                    scope, 
-                                    lerp_value<T>(observer, initial, final)));
+                                lerps = state->lerps;
                             }
-                            if (needSchedule) {
+
+                            if (!lerps.empty()) {
+                                auto begin = lerps.begin();
+                                auto cursor = lerps.begin();
+                                auto end = lerps.end();
+                                auto sc = lerps.front()->first;
+                                sc.finish = lerps.back()->first.finish;
+                                auto sc_state = ta.state(sc, thisTick);
+                                if (sc_state == animation_state::Running) {
+                                    auto sc = lerps.front()->first;
+                                    sc.finish = lerps.back()->first.finish;
+
+                                    auto st_time = state->animation.ease(state->animation.adjust(sc, thisTick));
+
+                                    auto st_timepoint = sc.start + std::chrono::duration_cast<std::chrono::milliseconds>(sc.duration() * st_time);
+                                    for (;cursor != end && !(*cursor)->first.contains(st_timepoint); ++cursor);
+
+                                    if (cursor != end) {
+                                        auto& lerp = *cursor;
+                                        auto time = static_cast<float>((st_timepoint - lerp->first.start).count()) / (lerp->first.finish - lerp->first.start).count();
 #if 0
-                                {std::wstringstream logmsg;
-                                std::time_t tt = std::chrono::system_clock::to_time_t(nextTick);
-                                logmsg << L"Schedule First Tick: " << std::ctime(&tt) << std::endl; 
-                                OutputDebugString(logmsg.str().c_str());}
+                                        size_t num = (st_timepoint - lerp->first.start).count();
+                                        size_t den = (lerp->first.finish - lerp->first.start).count();
+                                        std::wstringstream logmsg;
+                                        logmsg <<     L"tick      time: " << time_insert(thisTick) << std::endl; 
+                                        logmsg <<     L"    eased time: " << time_insert(st_timepoint) << std::endl; 
+                                        logmsg <<     L"         scope: " << time_insert(sc.start) << L"-" << time_insert(sc.finish) << std::endl; 
+                                        logmsg <<     L"    step scope: " << time_insert(lerp->first.start) << L"-" << time_insert(lerp->first.finish) << std::endl; 
+                                        logmsg <<     L"     numerator: " << num << std::endl; 
+                                        logmsg <<     L"   denominator: " << den << std::endl; 
+                                        if (den != 0) {
+                                            logmsg << L"         place: " << (num%den) << std::endl; 
+                                            logmsg << L"     iteration: " << (num/den) << std::endl; 
+                                            logmsg << L"    normalized: " << (static_cast<float>(num%den)/den) << std::endl;}
+                                        logmsg <<     L"        result: " << time << std::endl << std::endl; 
+                                        OutputDebugString(logmsg.str().c_str());
 #endif
-                                sd.Set(scheduler->Schedule(
-                                    nextTick,
-                                    rx::fix0([=](rx::Scheduler::shared s, std::function<rx::Disposable(rx::Scheduler::shared)> self) 
-                                        -> rx::Disposable {
-#if 0
-                                        {std::wstringstream logmsg;
-                                        std::time_t tt = std::chrono::system_clock::to_time_t(s->Now());
-                                        logmsg << L"Tick: " << std::ctime(&tt) << std::endl; 
-                                        OutputDebugString(logmsg.str().c_str());}
-#endif
-                                        time_point thisTick;
-                                        time_point nextTick;
-                                        lerps_type lerps;
-                                        {
-                                            std::unique_lock<std::mutex> guard(state->lock);
-                                            lerps = state->lerps;
-                                            thisTick = state->nextTick;
-                                            nextTick = thisTick + state->animation.update;
-                                            state->nextTick = nextTick;
-                                        }
-                                        auto begin = lerps.begin();
-                                        auto cursor = lerps.begin();
-                                        auto end = lerps.end();
-                                        std::vector<difference_type> finished;
-                                        for (;cursor != end; ++cursor) {
-                                            auto& lerp = *cursor;
-                                            auto animState = step(state->animation, lerp->first, step_type(lerp->second), thisTick);
-                                            if (animState == animation_state::Finished) {
-                                                finished.push_back(std::distance(begin, cursor));
-                                            }
-                                        }
-                                        {
-                                            std::unique_lock<std::mutex> guard(state->lock);
-                                            std::sort(finished.begin(), finished.end());
-                                            std::for_each(finished.rbegin(), finished.rend(), [state](difference_type offset){
-                                                state->lerps.erase(state->lerps.begin() + offset);});
-                                            if (state->lerps.empty()) {
-                                                sd.Dispose(); return rx::Disposable::Empty();}
-                                            if (state->lerps.front()->first.start > state->nextTick) {
-                                                nextTick = state->lerps.front()->first.start;
-                                                state->nextTick = nextTick;}
-                                        }
-#if 0
-                                        {std::wstringstream logmsg;
-                                        std::time_t tt = std::chrono::system_clock::to_time_t(nextTick);
-                                        logmsg << L"Schedule Next Tick: " << std::ctime(&tt) << std::endl; 
-                                        OutputDebugString(logmsg.str().c_str());}
-#endif
-                                        sd.Set(s->Schedule(nextTick, std::move(self)));
-                                        return rx::Disposable::Empty();
-                                    })));
+                                        lerp->second(sc_state, time);}}
+                                else if (sc_state == animation_state::Finished) {
+                                    lerps.back()->second(sc_state, 1.0f);}
+
+                                {
+                                    std::unique_lock<std::mutex> guard(state->lock);
+                                    if (sc_state == animation_state::Finished) {
+                                        state->lerps.clear();}
+                                }
                             }
                         },
                     // on completed
@@ -1175,6 +1320,7 @@ namespace rxanim {
                             observer->OnError(e);
                             cd.Dispose();
                     }));
+#endif
                 return cd;
             });
     }
@@ -1183,12 +1329,12 @@ namespace rxanim {
     template<class T, class TimeSelector>
     auto rxcpp_chain(animate&&, 
         const std::shared_ptr<rx::Observable<T>>& sourceFinal, 
-        TimeSelector timeSelector, 
+        const std::shared_ptr<rx::Observable<typename rx::Scheduler::clock::time_point>>& sourceInterval, 
         time_animation<typename rx::Scheduler::clock> ta,
-        typename rx::Scheduler::shared scheduler
+        TimeSelector timeSelector 
         ) 
-        -> decltype(Animate(sourceFinal, timeSelector, ta, scheduler)) {
-        return      Animate(sourceFinal, timeSelector, ta, scheduler);
+        -> decltype(Animate(sourceFinal, sourceInterval, ta, timeSelector)) {
+        return      Animate(sourceFinal, sourceInterval, ta, timeSelector);
     }
 }
 using rxanim::rxcpp_chain;
@@ -1271,12 +1417,21 @@ namespace RootWindow
         text_measure textmeasure;
     };
 
+    struct LabelCounts {
+        std::wstring text;
+        Count source;
+        Count distinct;
+        Count animated;
+        Count observed;
+    };
+
     // note: no base class
     struct window
     {
         typedef rxmsg::window_measure<rxmsg::traits::Default> top_measure;
         typedef rx::Scheduler::clock clock;
         typedef rxanim::time_animation<clock> time_animation;
+        typedef time_animation::adjust_type adjust_type;
         typedef time_animation::state_type state_type;
         typedef time_animation::time_range time_range;
         typedef time_animation::time_point time_point;
@@ -1292,8 +1447,50 @@ namespace RootWindow
             , editSubclass(rxmsg::set_window_subclass(edit.get(), editMessages))
             , mousePoint(rx::CreateBehaviorSubject<typename top_measure::Point>(top_measure::Point()))
         {
-            auto worker = std::make_shared<rx::EventLoopScheduler>();
             auto mainFormScheduler = std::make_shared<rx::win32::WindowScheduler>();
+            auto worker = std::make_shared<rx::EventLoopScheduler>();
+            auto animateSource = std::make_shared<rx::EventLoopScheduler>();
+            auto updateInterval = rx::from(rxcpp::Interval(std::chrono::milliseconds(30), animateSource))
+                .select([](size_t ){return clock::now();})
+                .publish();
+
+            {
+            rx::Disposable d([](){
+                OutputDebugString(L"disposable::dispose\n");});
+            d.Dispose();
+
+            rx::SerialDisposable sd;
+            sd.Set(rx::Disposable([](){
+                OutputDebugString(L"SerialDisposable::dispose\n");}));
+            sd.Dispose();
+
+            rx::ComposableDisposable cd;
+            for (int i = 0; i < 2; ++i) {
+                cd.Dispose();
+                cd.Add(rx::Disposable([](){
+                    OutputDebugString(L"composabledisposible::disposable::dispose\n");}));
+                cd.Add(sd);
+                sd.Set(rx::Disposable([](){
+                    OutputDebugString(L"composabledisposible::SerialDisposable::dispose\n");}));
+
+                cd.Add([]() -> rx::Disposable {
+                    rx::ComposableDisposable cd;
+                    cd.Add(rx::Disposable([](){
+                        OutputDebugString(L"nested composabledisposible::SerialDisposable::dispose\n");}));
+                    return cd;
+                }());
+            }
+
+            cd.Dispose();
+
+            Count c;
+            rx::SerialDisposable test;
+            test.Set(rx::from(messages)
+                .chain<record>(&c)
+                .subscribe([=](const rxmsg::message&){
+                    test.Dispose();}
+            ));
+            }
 
             auto rootMeasurement = rx::from(messages)
                 .chain<top_measure::select_client_measurement>()
@@ -1307,25 +1504,24 @@ namespace RootWindow
 
             auto ta = time_animation(
                 std::chrono::milliseconds(30),
-                state_type(rxanim::runOnce<time_range, time_point>), 
+                state_type(rxanim::runN<3, time_range, time_point>), 
+                adjust_type(rxanim::adjustPingPong<time_range, time_point>),
                 rxanim::ease_type(rxanim::easeSquareRoot));
 
             rx::from(editBounds)
                 // set the initial value
-                .select([](std::tuple<int, int, int>){return std::make_tuple(0,0,0);})
                 .take(1)
                 // merge the values to animate to
                 .merge(editBounds)
-                .chain<rxanim::animate>(
+                .chain<rxanim::animate>(updateInterval, ta,
                     [](time_point now, const std::tuple<int, int, int>&){
-                        return now + std::chrono::milliseconds(500);},
-                    ta,
-                    worker)
+                        return now + std::chrono::milliseconds(500);})
                 .observe_on(mainFormScheduler)
                 .subscribe(
                     rx::MakeTupleDispatch([this](int left, int top, int width){
                         SetWindowPos(edit.get(), nullptr, left, top, width, 30, SWP_NOOWNERZORDER);
                         InvalidateRect(edit.get(), nullptr, true);
+                        UpdateWindow(edit.get());
                     }));
 
             auto commands = rx::from(messages)
@@ -1359,7 +1555,7 @@ namespace RootWindow
                 .where(rxmsg::messageId<rxmsg::wm::ncdestroy>())
                 .subscribe([this](const rxmsg::message& m){
                     set_handled(m);
-                    cd.Dispose();
+                    cd->Dispose();
                     PostQuitMessage(0);
                 });
 
@@ -1440,8 +1636,24 @@ namespace RootWindow
                     [=](const std::wstring& msg){
                         // set up labels and query
 
-                        cd.Dispose();
+                        if (cd) {
+                            cd->Dispose();
+                        }
+                        cd = std::make_shared<rx::ComposableDisposable>();
                         labels.clear();
+#if 1
+                        std::wstringstream logmsg;
+                        for (auto& c : counts) {
+                            logmsg << "'" << c.text << "'" << std::endl;
+                            logmsg << " location: nexts, completions, errors, disposals" << std::endl;
+                            logmsg << "   source: " << c.source.nexts   << ", " << c.source.completions   << ", " << c.source.errors   << ", " << c.source.disposals   << std::endl;
+                            logmsg << " distinct: " << c.distinct.nexts << ", " << c.distinct.completions << ", " << c.distinct.errors << ", " << c.distinct.disposals << std::endl;
+                            logmsg << " animated: " << c.animated.nexts << ", " << c.animated.completions << ", " << c.animated.errors << ", " << c.animated.disposals << std::endl;
+                            logmsg << " observed: " << c.observed.nexts << ", " << c.observed.completions << ", " << c.observed.errors << ", " << c.observed.disposals << std::endl;
+                        }
+                        OutputDebugString(logmsg.str().c_str());
+#endif
+                        counts.clear();
                         maxHeight = 0;
                         int relativeX = 0;
 
@@ -1456,23 +1668,37 @@ namespace RootWindow
                             POINT loc = {20 * i, 30};
                             auto& charlabel = CreateLabelFromLetter(msg[i], loc, cs.hInstance, handle);
                             auto labelMeasurement = charlabel.textmeasure.measureText();
+                            counts.emplace_back();
+                            auto& c = counts.back();
+                            c.text.append(msg.begin() + i, msg.begin() + i + 1);
 
                             maxHeight = std::max(maxHeight, labelMeasurement.height().c);
 
-                            rx::from(point)
+                            cd->Add(rx::from(point)
+                                .chain<record>(&c.source)
                                 .distinct_until_changed()
+                                .chain<record>(&c.distinct)
                                 .chain<rxanim::animate>(
-                                    [=](time_point now, const std::tuple<int, int>&){
-                                        return now + std::chrono::milliseconds(100 * i);},
+                                    updateInterval,
                                     ta,
-                                    worker)
+                                    [=](time_point now, const std::tuple<int, int>&){
+                                        return now + std::chrono::milliseconds(100 * i);})
+                                .chain<record>(&c.animated)
                                 .observe_on(mainFormScheduler)
-                                .subscribe(rx::MakeTupleDispatch(
+                                .chain<record>(&c.observed)
+                                .subscribe(
+                                // on next
+                                    rx::MakeTupleDispatch(
                                     [&charlabel, labelMeasurement, relativeX](int x, int y) {
                                         SetWindowPos(charlabel.window.get(), nullptr, x + relativeX, std::max(30, y), labelMeasurement.width().c, labelMeasurement.height().c, SWP_NOOWNERZORDER);
                                         InvalidateRect(charlabel.window.get(), nullptr, true);
                                         UpdateWindow(charlabel.window.get());
-                                    }));
+                                    }),
+                                // on completed
+                                    [](){},
+                                // on error
+                                    [this](const std::exception_ptr& e){
+                                        exceptions->push(std::make_pair("error in label onmove stream: ", e));}));
 
                             relativeX += labelMeasurement.width().c;
                         }
@@ -1481,12 +1707,13 @@ namespace RootWindow
                     [](){},
                 //on error
                     [this](const std::exception_ptr& e){
-                        exceptions->push(std::make_pair("error in label onmove stream: ", e));});
+                        exceptions->push(std::make_pair("error in text change stream: ", e));});
 
             auto msg = L"Time flies like an arrow";
             //auto msg = L"Hello";
             Edit_SetText(edit.get(), msg);
             text->OnNext(msg);
+
         }
 
         inline label& CreateLabelFromLetter(wchar_t c, POINT p, HINSTANCE hinst, HWND parent)
@@ -1514,8 +1741,9 @@ namespace RootWindow
         l::wr::unique_destroy_window edit;
         rxmsg::subclass_message::Subject editMessages;
         rxmsg::set_subclass_result editSubclass;
-        rx::ComposableDisposable cd;
+        std::shared_ptr<rx::ComposableDisposable> cd;
         std::list<label> labels;
+        std::list<LabelCounts> counts;
         label::SubjectPoint mousePoint;
     };
 }
