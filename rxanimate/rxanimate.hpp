@@ -271,12 +271,12 @@ namespace rx=rxcpp;
         }
     };
 
-    template<class T, class TimeSelector>
+    template<class T, class InitialSelector, class TimeSelector>
     auto Animate(
         const std::shared_ptr<rx::Observable<T>>& sourceFinal, 
         const std::shared_ptr<rx::Observable<typename rx::Scheduler::clock::time_point>>& sourceInterval, 
         time_animation<typename rx::Scheduler::clock> ta,
-        T initial,
+        InitialSelector initialSelector,
         TimeSelector timeSelector 
         ) 
         -> std::shared_ptr<rx::Observable<T>> {
@@ -294,113 +294,134 @@ namespace rx=rxcpp;
             [=](const std::shared_ptr<rx::Observer<T>>& observer) 
                 -> rx::Disposable {
                 struct State {
-                    State(time_animation ta, T i) : 
-                        initial(i), animation(std::move(ta)) {}
+                    State(time_animation ta) : 
+                        running(false), animation(std::move(ta)) {}
                     std::mutex lock;
-                    T initial;
                     lerps_type lerps;
+                    bool running;
                     time_animation animation;
                 };
-                auto state = std::make_shared<State>(ta, initial);
+                auto state = std::make_shared<State>(ta);
                 rx::ComposableDisposable cd;
-#if 1
+
+                auto wd = cd.Add(rx::Disposable::Empty());
+
                 cd.Add(rx::from(sourceFinal)
                     .subscribe(
                     // on next
                         [=](T final) {
                             auto now = clock::now();
-                            auto finish = timeSelector(now, final);
-
-                            std::unique_lock<std::mutex> guard(state->lock);
 
                             auto start = now;
                             auto initial = final;
 
-                            if (!state->lerps.empty()) {
-                                start = state->lerps.back()->first.finish;
-                                initial = state->lerps.back()->second.final;}
-                            else {
-                                initial = state->initial;}
-
-                            state->initial = final;
-
-                            auto scope = time_range(start, finish);
-
-                            state->lerps.push_back(std::make_shared<lerp_value_type>(
-                                scope, 
-                                lerp_value<T>(observer, initial, final)));
-                        },
-                    // on completed
-                        [=](){
-                            observer->OnCompleted();
-                            cd.Dispose();
-                        }, 
-                    // on error
-                        [=](const std::exception_ptr& e){
-                            observer->OnError(e);
-                            cd.Dispose();
-                    }));
-
-                cd.Add(rx::from(sourceInterval)
-                    .subscribe(
-                    // on next
-                        [=](time_point thisTick) {
-#if 0
-                            {std::wstringstream logmsg;
-                            std::time_t tt = std::chrono::system_clock::to_time_t(thisTick);
-                            logmsg << L"Tick: " << std::ctime(&tt) << std::endl; 
-                            OutputDebugString(logmsg.str().c_str());}
-#endif
-                            lerps_type lerps;
                             {
                                 std::unique_lock<std::mutex> guard(state->lock);
-                                lerps = state->lerps;
+
+                                if (!state->lerps.empty()) {
+                                    start = state->lerps.back()->first.finish;
+                                    initial = state->lerps.back()->second.final;}
                             }
 
-                            if (!lerps.empty()) {
-                                auto begin = lerps.begin();
-                                auto cursor = lerps.begin();
-                                auto end = lerps.end();
-                                auto sc = lerps.front()->first;
-                                sc.finish = lerps.back()->first.finish;
-                                auto sc_state = ta.state(sc, thisTick);
-                                if (sc_state == animation_state::Running) {
-                                    auto sc = lerps.front()->first;
-                                    sc.finish = lerps.back()->first.finish;
+                            initial = initialSelector(initial);
 
-                                    auto st_time = state->animation.ease(state->animation.adjust(sc, thisTick));
+                            auto scope = timeSelector(now, start, initial, final);
 
-                                    auto st_timepoint = sc.start + std::chrono::duration_cast<std::chrono::milliseconds>(sc.duration() * st_time);
-                                    for (;cursor != end && !(*cursor)->first.contains(st_timepoint); ++cursor);
+                            bool needInterval = false;
+                            {
+                                std::unique_lock<std::mutex> guard(state->lock);
 
-                                    if (cursor != end) {
-                                        auto& lerp = *cursor;
-                                        auto time = static_cast<float>((st_timepoint - lerp->first.start).count()) / (lerp->first.finish - lerp->first.start).count();
-#if 0
-                                        size_t num = (st_timepoint - lerp->first.start).count();
-                                        size_t den = (lerp->first.finish - lerp->first.start).count();
-                                        std::wstringstream logmsg;
-                                        logmsg <<     L"tick      time: " << time_insert(thisTick) << std::endl; 
-                                        logmsg <<     L"    eased time: " << time_insert(st_timepoint) << std::endl; 
-                                        logmsg <<     L"         scope: " << time_insert(sc.start) << L"-" << time_insert(sc.finish) << std::endl; 
-                                        logmsg <<     L"    step scope: " << time_insert(lerp->first.start) << L"-" << time_insert(lerp->first.finish) << std::endl; 
-                                        logmsg <<     L"     numerator: " << num << std::endl; 
-                                        logmsg <<     L"   denominator: " << den << std::endl; 
-                                        if (den != 0) {
-                                            logmsg << L"         place: " << (num%den) << std::endl; 
-                                            logmsg << L"     iteration: " << (num/den) << std::endl; 
-                                            logmsg << L"    normalized: " << (static_cast<float>(num%den)/den) << std::endl;}
-                                        logmsg <<     L"        result: " << time << std::endl << std::endl; 
-                                        OutputDebugString(logmsg.str().c_str());
-#endif
-                                        lerp->second(sc_state, time);}}
-                                else if (sc_state == animation_state::Finished) {
-                                    lerps.back()->second(sc_state, 1.0f);}
+                                state->lerps.push_back(std::make_shared<lerp_value_type>(
+                                    scope, 
+                                    lerp_value<T>(observer, initial, final)));
 
+                                if (!state->running) {
+                                    state->running = true; needInterval = true;}
+                            }
+
+                            if (needInterval) {
+                                auto intervalDisposable = rx::from(sourceInterval)
+                                    .subscribe(
+                                    // on next
+                                        [=](time_point thisTick) {
+    #if 0
+                                            {std::wstringstream logmsg;
+                                            std::time_t tt = std::chrono::system_clock::to_time_t(thisTick);
+                                            logmsg << L"Tick: " << std::ctime(&tt) << std::endl; 
+                                            OutputDebugString(logmsg.str().c_str());}
+    #endif
+                                            lerps_type lerps;
+                                            {
+                                                std::unique_lock<std::mutex> guard(state->lock);
+                                                lerps = state->lerps;
+                                            }
+
+                                            if (!lerps.empty()) {
+                                                auto begin = lerps.begin();
+                                                auto cursor = lerps.begin();
+                                                auto end = lerps.end();
+                                                auto sc = lerps.front()->first;
+                                                sc.finish = lerps.back()->first.finish;
+                                                auto sc_state = ta.state(sc, thisTick);
+                                                if (sc_state == animation_state::Running) {
+                                                    auto sc = lerps.front()->first;
+                                                    sc.finish = lerps.back()->first.finish;
+
+                                                    auto st_time = state->animation.ease(state->animation.adjust(sc, thisTick));
+
+                                                    auto st_timepoint = sc.start + std::chrono::duration_cast<std::chrono::milliseconds>(sc.duration() * st_time);
+                                                    for (;cursor != end && !(*cursor)->first.contains(st_timepoint); ++cursor);
+
+                                                    if (cursor != end) {
+                                                        auto& lerp = *cursor;
+                                                        auto time = static_cast<float>((st_timepoint - lerp->first.start).count()) / (lerp->first.finish - lerp->first.start).count();
+    #if 0
+                                                        size_t num = (st_timepoint - lerp->first.start).count();
+                                                        size_t den = (lerp->first.finish - lerp->first.start).count();
+                                                        std::wstringstream logmsg;
+                                                        logmsg <<     L"tick      time: " << time_insert(thisTick) << std::endl; 
+                                                        logmsg <<     L"    eased time: " << time_insert(st_timepoint) << std::endl; 
+                                                        logmsg <<     L"         scope: " << time_insert(sc.start) << L"-" << time_insert(sc.finish) << std::endl; 
+                                                        logmsg <<     L"    step scope: " << time_insert(lerp->first.start) << L"-" << time_insert(lerp->first.finish) << std::endl; 
+                                                        logmsg <<     L"     numerator: " << num << std::endl; 
+                                                        logmsg <<     L"   denominator: " << den << std::endl; 
+                                                        if (den != 0) {
+                                                            logmsg << L"         place: " << (num%den) << std::endl; 
+                                                            logmsg << L"     iteration: " << (num/den) << std::endl; 
+                                                            logmsg << L"    normalized: " << (static_cast<float>(num%den)/den) << std::endl;}
+                                                        logmsg <<     L"        result: " << time << std::endl << std::endl; 
+                                                        OutputDebugString(logmsg.str().c_str());
+    #endif
+                                                        lerp->second(sc_state, time);}}
+                                                else if (sc_state == animation_state::Finished) {
+                                                    lerps.back()->second(sc_state, 1.0f);}
+
+                                                {
+                                                    std::unique_lock<std::mutex> guard(state->lock);
+                                                    if (sc_state == animation_state::Finished) {
+                                                        state->lerps.clear();
+                                                        state->running = false;
+                                                        auto strong = wd.lock();
+                                                        guard.unlock();
+                                                        strong->Dispose();}
+                                                }
+                                            }
+                                        },
+                                    // on completed
+                                        [=](){
+                                            observer->OnCompleted();
+                                            cd.Dispose();
+                                        }, 
+                                    // on error
+                                        [=](const std::exception_ptr& e){
+                                            observer->OnError(e);
+                                            cd.Dispose();
+                                    });
                                 {
                                     std::unique_lock<std::mutex> guard(state->lock);
-                                    if (sc_state == animation_state::Finished) {
-                                        state->lerps.clear();}
+                                    auto strong = wd.lock();
+                                    if (strong) {
+                                        *strong.get() = std::move(intervalDisposable);}
                                 }
                             }
                         },
@@ -414,22 +435,21 @@ namespace rx=rxcpp;
                             observer->OnError(e);
                             cd.Dispose();
                     }));
-#endif
                 return cd;
             });
     }
 
     struct animate {};
-    template<class T, class TimeSelector>
+    template<class T, class InitialSelector, class TimeSelector>
     auto rxcpp_chain(animate&&, 
         const std::shared_ptr<rx::Observable<T>>& sourceFinal, 
         const std::shared_ptr<rx::Observable<typename rx::Scheduler::clock::time_point>>& sourceInterval, 
         time_animation<typename rx::Scheduler::clock> ta,
-        T initial,
+        InitialSelector initialSelector,
         TimeSelector timeSelector 
         ) 
-        -> decltype(Animate(sourceFinal, sourceInterval, ta, initial, timeSelector)) {
-        return      Animate(sourceFinal, sourceInterval, ta, initial, timeSelector);
+        -> decltype(Animate(sourceFinal, sourceInterval, ta, initialSelector, timeSelector)) {
+        return      Animate(sourceFinal, sourceInterval, ta, initialSelector, timeSelector);
     }
 }
 using rxanim::rxcpp_chain;

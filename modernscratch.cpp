@@ -157,7 +157,7 @@ namespace RootWindow
             , mousePoint(rx::CreateBehaviorSubject<typename top_measure::Point>(top_measure::Point()))
         {
             auto mainFormScheduler = std::make_shared<rx::win32::WindowScheduler>();
-            auto worker = std::make_shared<rx::EventLoopScheduler>();
+            auto worker = std::make_shared<rx::NewThreadScheduler>();
 
             auto animateSource = std::make_shared<rx::EventLoopScheduler>();
             auto updateInterval = rx::from(rxcpp::Interval(std::chrono::milliseconds(30), animateSource))
@@ -187,9 +187,14 @@ namespace RootWindow
             rx::from(editBounds)
                 .throttle(std::chrono::milliseconds(100), worker)
                 .chain<rxanim::animate>(updateInterval, editta,
-                    std::make_tuple(0,0,0),
-                    [](time_point now, const std::tuple<int, int, int>&){
-                        return now + std::chrono::seconds(2);})
+                    [=](const std::tuple<int, int, int>& ){
+                        RECT rc = {};
+                        GetClientRect(edit.get(), &rc);
+                        return std::make_tuple(rc.left, rc.top, rc.right - rc.left);},
+                    [=](time_point now, time_point animateFinish, const std::tuple<int, int, int>&, const std::tuple<int, int, int>&){
+                        return rxanim::time_range<clock>(
+                            animateFinish, 
+                            animateFinish + std::chrono::seconds(2));})
                 .observe_on(mainFormScheduler)
                 .subscribe(
                     rx::MakeTupleDispatch([this](int left, int top, int width){
@@ -354,12 +359,13 @@ namespace RootWindow
                                 .chain<record>(&c.source)
                                 .distinct_until_changed()
                                 .chain<record>(&c.distinct)
-                                .chain<rxanim::animate>(
-                                    updateInterval,
-                                    ta,
-                                    std::make_tuple(0,0),
-                                    [=](time_point now, const std::tuple<int, int>&){
-                                        return now + std::chrono::milliseconds(100 * i);})
+                                .chain<rxanim::animate>(updateInterval, ta,
+                                    [&charlabel](const std::tuple<int, int>& animateFinal){
+                                        return animateFinal;},
+                                    [=](time_point now, time_point, const std::tuple<int, int>&, const std::tuple<int, int>&){
+                                        return rxanim::time_range<clock>(
+                                            now + std::chrono::milliseconds(100 * (i-1)), 
+                                            now + std::chrono::milliseconds(100 * i));})
                                 .chain<record>(&c.animated)
                                 .observe_on(mainFormScheduler)
                                 .chain<record>(&c.observed)
