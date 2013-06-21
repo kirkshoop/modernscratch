@@ -32,7 +32,7 @@ namespace detail {
                             return rxmsg::crack_message<rxmsg::wm::windowposchanged>(msg);})
                         .subscribe(
                         // on next
-                            rxcpp::MakeTupleDispatch([=](const LPWINDOWPOS pos, const Message& msg){
+                            rxcpp::MakeTupleDispatch([=](const LPWINDOWPOS , const Message& msg){
                                 RECT client = {};
                                 GetClientRect(msg.window, &client);
                                 Measurement m(
@@ -60,7 +60,7 @@ namespace detail {
             return rx::CreateObservable<Measurement>(
                 [=](const std::shared_ptr<rx::Observer<Measurement>>& observer) {
                     return rx::from(source)
-                        .where(messageId<rxmsg::wm::windowposchanged>())
+                        .where(rxmsg::messageId<rxmsg::wm::windowposchanged>())
                         .select([](const Message& msg){
                             return rxmsg::crack_message<rxmsg::wm::windowposchanged>(msg);})
                         .subscribe(
@@ -93,12 +93,12 @@ namespace detail {
             return rx::CreateObservable<Measurement>(
                 [=](const std::shared_ptr<rx::Observer<Measurement>>& observer) {
                     return rx::from(source)
-                        .where(messageId<rxmsg::wm::windowposchanged>())
+                        .where(rxmsg::messageId<rxmsg::wm::windowposchanged>())
                         .select([](const Message& msg){
                             return rxmsg::crack_message<rxmsg::wm::windowposchanged>(msg);})
                         .subscribe(
                         // on next
-                            rxcpp::MakeTupleDispatch([=](const LPWINDOWPOS pos, const Message& msg){
+                            rxcpp::MakeTupleDispatch([=](const LPWINDOWPOS , const Message& msg){
                                 RECT screen = {};
                                 GetWindowRect(msg.window, &screen);
                                 auto parent = GetAncestor(msg.window, GA_PARENT);

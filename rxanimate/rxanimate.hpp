@@ -19,7 +19,6 @@ namespace rx=rxcpp;
         duration_type duration() {return finish - start;}
     };
 
-
     float easeNone(float t) {return t;}
     float easeSquare(float t) {return t*t;}
     float easeSquareRoot(float t) {return sqrt(t);}
@@ -28,18 +27,18 @@ namespace rx=rxcpp;
     template<int Den>
     float easeRoot(float t) {return pow(t, 1/Den);}
     float easeElasticDamp(float t) {
-        return 1.0f - pow(2, -10 * t) * sin(4 * 3.14 * (t+3.14));}
+        return 1.0f - std::pow(2.0f, -10.0f * t) * std::sin(4.0f * 3.14f * (t+3.14f));}
     float easeElasticAmp(float t) {
-        return pow(2, 10 * (t - 1)) * sin(4 * 3.14 * (t+3.14));}
+        return std::pow(2.0f, 10 * (t - 1.0f)) * std::sin(4.0f * 3.14f * (t+3.14f));}
     float easeBounceDamp(float t) {
-        if (t < .27) {
-            return (4*3.14*t*t);}
-        else if (t < .71) {
-            return (4*3.14*(t-.5)*(t-.5))+.4;}
-        else if (t < .89) {
-            return (4*3.14*(t-.8)*(t-.8))+.92;}
+        if (t < .27f) {
+            return (4*3.14f*t*t);}
+        else if (t < .71f) {
+            return (4*3.14f*(t-.5f)*(t-.5f))+.4f;}
+        else if (t < .89f) {
+            return (4*3.14f*(t-.8f)*(t-.8f))+.92f;}
         else {
-            return (4*3.14*(t-.94)*(t-.94))+.97;}}
+            return (4*3.14f*(t-.94f)*(t-.94f))+.97f;}}
     float easeBounceAmp(float t) {
         return 1.0f - easeBounceDamp(t);}
 
@@ -65,8 +64,8 @@ namespace rx=rxcpp;
 
     template<class TimeRange, class TimePoint>
     float adjustNone(TimeRange r, TimePoint p) {
-        size_t den = r.duration().count();
-        size_t num = (p - r.start).count();
+        auto den = r.duration().count();
+        auto num = (p - r.start).count();
 #if 0
         std::wstringstream logmsg;
         std::time_t tt = std::chrono::system_clock::to_time_t(p);
@@ -90,8 +89,8 @@ namespace rx=rxcpp;
 
     template<class TimeRange, class TimePoint>
     float adjustPingPong(TimeRange r, TimePoint p) {
-        size_t den = r.duration().count();
-        size_t num = (p - r.start).count();
+        auto den = r.duration().count();
+        auto num = (p - r.start).count();
         float none = adjustNone(r, p);
 #if 0
         std::wstringstream logmsg;
@@ -240,10 +239,8 @@ namespace rx=rxcpp;
         T initial;
         T final;
         std::shared_ptr<rx::Observer<T>> observer;
-        void operator()(animation_state::type state, float time) {
+        void operator()(animation_state::type , float time) {
             observer->OnNext(initial + ((final - initial) * time));
-            if (state == animation_state::Finished) {
-                observer->OnCompleted();}
         }
     };
 
@@ -256,7 +253,7 @@ namespace rx=rxcpp;
         T initial;
         T final;
         std::shared_ptr<rx::Observer<T>> observer;
-        void operator()(animation_state::type state, float time) {
+        void operator()(animation_state::type , float time) {
             rx::DispatchTuple(std::tuple_cat(initial, final), [time, this](Value... initialv, Value... finalv) {
                 T result(static_cast<Value>(initialv + ((finalv - initialv) * time))...);
 #if 0
