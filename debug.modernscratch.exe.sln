@@ -1,0 +1,26 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 2012
+Project("{911E67C6-3D85-4FCE-B560-20A9C3E3FF48}") = "modernscratch", "modernscratch.exe", "{C6098AB9-6669-467F-93B7-1ECB9ED80300}"
+	ProjectSection(DebuggerProjectSystem) = preProject
+		PortSupplier = 00000000-0000-0000-0000-000000000000
+		Executable = C:\Users\kshoop\Desktop\source\modernscratch\debug\modernscratch.exe
+		RemoteMachine = KSHOOP-8RTM
+		StartingDirectory = C:\Users\kshoop\Desktop\source\modernscratch\debug
+		Environment = path=C:\Users\kshoop\AppData\Local\Temp\stlbuild\wcfb01-2013.04.29\bin\i386;%PATH%	
+		LaunchingEngine = 00000000-0000-0000-0000-000000000000
+		LaunchSQLEngine = No
+		AttachLaunchAction = No
+	EndProjectSection
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|x86 = Debug|x86
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{C6098AB9-6669-467F-93B7-1ECB9ED80300}.Debug|x86.ActiveCfg = Debug|x86
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal
