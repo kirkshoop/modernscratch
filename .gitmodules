@@ -4,3 +4,8 @@
 [submodule "ext/Rx"]
 	path = ext/Rx
 	url = https://git01.codeplex.com/rx
+[submodule "ext/cpp-netlib"]
+
+	path = ext/cpp-netlib
+
+	url = https://github.com/cpp-netlib/cpp-netlib.git
