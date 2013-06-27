@@ -52,13 +52,16 @@ namespace whc = web::http::client;
 #define LIBRARIES_NAMESPACE mylib
 #include "libraries.h"
 
+#if 0
 #include "rxanimate/rxanimate.hpp"
+#endif
+
 #include "rxwin32/rxwin32.hpp"
+namespace rxmsr=rxmeasurement;
 
 namespace rx=rxcpp;
 namespace l=LIBRARIES_NAMESPACE;
 
-namespace rxmsr=rxmeasurement;
 
 typedef std::queue<std::pair<std::string, std::exception_ptr>> Exceptions;
 
@@ -211,15 +214,16 @@ namespace RootWindow
     // note: no base class
     struct window
     {
-        typedef rxmsr::window_measure<rxmsr::traits::Default> top_measure;
         typedef rx::Scheduler::clock clock;
+        typedef rxmsr::window_measure<rxmsr::traits::Default> top_measure;
+#if 0
         typedef rxanim::time_animation<clock> time_animation;
         typedef time_animation::adjust_type adjust_type;
         typedef time_animation::state_type state_type;
         typedef time_animation::time_range time_range;
         typedef time_animation::time_point time_point;
         typedef time_animation::duration_type time_duration;
-
+#endif
         window(HWND handle, CREATESTRUCT& cs)
             : root(handle)
             , instance(cs.hInstance)
@@ -233,23 +237,20 @@ namespace RootWindow
             , mousePoint(rx::CreateBehaviorSubject<typename top_measure::Point>(top_measure::Point()))
         {
             auto mainFormScheduler = std::make_shared<rx::win32::WindowScheduler>();
-            auto worker = std::make_shared<rx::NewThreadScheduler>();
+            auto worker = std::make_shared<rx::EventLoopScheduler>();
 
             auto animateSource = std::make_shared<rx::EventLoopScheduler>();
             auto updateInterval = rx::from(rxcpp::Interval(std::chrono::milliseconds(30), animateSource))
-                .select([](size_t ){return clock::now();})
-                .publish();
+                .select([](size_t ){return clock::now();});
 
             auto rootMeasurement = rx::from(messages)
                 .chain<top_measure::select_client_measurement>()
-                .distinct_until_changed()
-                .publish();
+                .distinct_until_changed();
 
             auto editBounds = rx::from(rootMeasurement)
                 .select([](top_measure::Measurement m){
-                    return std::make_tuple(m.left.c, m.top.c, m.width().c);})
-                .publish();
-
+                    return std::make_tuple(m.left.c, m.top.c, m.width().c);});
+#if 0
             auto editta = time_animation(
                 state_type(rxanim::runOnce<time_range, time_point>), 
                 adjust_type(rxanim::adjustNone<time_range, time_point>),
@@ -259,9 +260,9 @@ namespace RootWindow
                 state_type(rxanim::runN<3, time_range, time_point>), 
                 adjust_type(rxanim::adjustPingPong<time_range, time_point>),
                 rxanim::ease_type(rxanim::easeSquareRoot));
-
+#endif
             rx::from(editBounds)
-                .throttle(std::chrono::milliseconds(100), worker)
+#if 0
                 .chain<rxanim::animate>(updateInterval, editta,
                     [=](const std::tuple<int, int, int>& ){
                         RECT rc = {};
@@ -271,6 +272,7 @@ namespace RootWindow
                         return rxanim::time_range<clock>(
                             animateFinish, 
                             animateFinish + std::chrono::seconds(2));})
+#endif
                 .observe_on(mainFormScheduler)
                 .subscribe(
                     rx::MakeTupleDispatch([this](int left, int top, int width){
@@ -325,8 +327,7 @@ namespace RootWindow
             rx::from(rx::Interval(std::chrono::seconds(5), requestSource))
                 .select_many([=, this](size_t ){
                     return rx::from(Iterate(requests, worker))
-                        .chain<http_request>()
-                        .publish();
+                        .chain<http_request>();
                     },
                     [=, this](size_t, wh::http_response rs) {
                         std::unique_lock<std::mutex> guard(tilesLock);
@@ -349,8 +350,7 @@ namespace RootWindow
             auto commands = rx::from(messages)
                 .where(rxmsg::messageId<rxmsg::wm::command>())
                 .select([](const rxmsg::message& msg){
-                    return rxmsg::handle_message<rxmsg::wm::command>(msg);})
-                .publish();
+                    return rxmsg::handle_message<rxmsg::wm::command>(msg);});
 
             // edit text changed
             rx::from(commands)
@@ -427,12 +427,10 @@ namespace RootWindow
                 });
 
             auto mouseDown = rx::from(messages)
-                .where(rxmsg::messageId<rxmsg::wm::lbuttondown>())
-                .publish();
+                .where(rxmsg::messageId<rxmsg::wm::lbuttondown>());
 
             auto mouseUp = rx::from(messages)
-                .where(rxmsg::messageId<rxmsg::wm::lbuttonup>())
-                .publish();
+                .where(rxmsg::messageId<rxmsg::wm::lbuttonup>());
 
             // note: distinct_until_changed is necessary; while 
             //  Winforms filters duplicate mouse moves, 
@@ -447,8 +445,7 @@ namespace RootWindow
                         .where(rxmsg::messageId<rxmsg::wm::mousemove>())
                         .select([](const rxmsg::message& msg){
                             return rxmsg::handle_message<rxmsg::wm::mousemove>(msg);})
-                        .distinct_until_changed()
-                        .publish();})
+                        .distinct_until_changed();})
                 .subscribe(rxcpp::MakeTupleDispatch([=](int x, int y, UINT, const rxmsg::message&) {
                     POINT p = {x, y}; mousePoint->OnNext(top_measure::Point(p));}));
 
@@ -483,8 +480,7 @@ namespace RootWindow
                         auto point = rx::from(mousePoint)
                             // make the text appear above the mouse location
                             .select([this](top_measure::Point p){
-                                p.p.y -= maxHeight; return std::tuple<int, int>(p.p.x, p.p.y);})
-                            .publish();
+                                p.p.y -= maxHeight; return std::tuple<int, int>(p.p.x, p.p.y);});
 
                         for (int i = 0; msg[i]; ++i)
                         {
@@ -502,6 +498,7 @@ namespace RootWindow
                                 .chain<record>(&c.source)
                                 .distinct_until_changed()
                                 .chain<record>(&c.distinct)
+#if 0
                                 .chain<rxanim::animate>(updateInterval, ta,
                                     [&charlabel](const std::tuple<int, int>& animateFinal){
                                         return animateFinal;},
@@ -510,6 +507,9 @@ namespace RootWindow
                                             now + std::chrono::milliseconds(100 * (i-1)), 
                                             now + std::chrono::milliseconds(100 * i));})
                                 .chain<record>(&c.animated)
+#else
+                                .delay(std::chrono::milliseconds(100 * i), worker)
+#endif
                                 .observe_on(mainFormScheduler)
                                 .chain<record>(&c.observed)
                                 .subscribe(
