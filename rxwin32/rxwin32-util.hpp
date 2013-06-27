@@ -29,7 +29,7 @@ private:
     unique_rx_completed_factory();
 };
 
-
+#if RXCPP_USE_VARIADIC_TEMPLATES
 namespace detail {
 template<class T, class Indices>
 struct tuple_insert;
@@ -56,7 +56,7 @@ auto tuple_insert(const T& t)
     -> decltype(detail::tuple_insert<T, typename rxcpp::util::make_tuple_indices<T>::type>(t)) {
     return      detail::tuple_insert<T, typename rxcpp::util::make_tuple_indices<T>::type>(t);
 }
-
+#endif
 
 namespace detail {
 template<class T>

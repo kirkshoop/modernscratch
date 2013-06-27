@@ -141,6 +141,7 @@ struct extract_lresult {
 };
 }
 
+#if RXCPP_USE_VARIADIC_TEMPLATES
 template<class Tag, unsigned int Id, class... T>
 struct message_trait_builder {
     typedef Tag tag;
@@ -160,6 +161,107 @@ struct message_trait_builder {
         return result;
     }
 };
+#else
+struct no_type {};
+template<class Tag, unsigned int Id, class T1 = no_type, class T2 = no_type, class T3 = no_type, class T4 = no_type>
+struct message_trait_builder;
+
+template<class Tag, unsigned int Id>
+struct message_trait_builder<Tag, Id, no_type, no_type, no_type, no_type> {
+    typedef Tag tag;
+    static const unsigned int id = Id;
+
+    template<class Message>
+    struct args {
+        typedef std::tuple<Message> type;
+    };
+
+    template<class Message>
+    static typename args<Message>::type crack(Message m) {
+        typedef typename args<Message>::type args_type;
+        args_type result;
+        set_lResult(m, rxmsg_crack(tag(), m, [&](HWND) -> detail::extract_lresult {
+            result = args_type(m); return detail::extract_lresult();}));
+        return result;
+    }
+};
+template<class Tag, unsigned int Id, class T1>
+struct message_trait_builder<Tag, Id, T1, no_type, no_type, no_type> {
+    typedef Tag tag;
+    static const unsigned int id = Id;
+
+    template<class Message>
+    struct args {
+        typedef std::tuple<T1, Message> type;
+    };
+
+    template<class Message>
+    static typename args<Message>::type crack(Message m) {
+        typedef typename args<Message>::type args_type;
+        args_type result;
+        set_lResult(m, rxmsg_crack(tag(), m, [&](HWND, T1 t) -> detail::extract_lresult {
+            result = args_type(t, m); return detail::extract_lresult();}));
+        return result;
+    }
+};
+template<class Tag, unsigned int Id, class T1, class T2>
+struct message_trait_builder<Tag, Id, T1, T2, no_type, no_type> {
+    typedef Tag tag;
+    static const unsigned int id = Id;
+
+    template<class Message>
+    struct args {
+        typedef std::tuple<T1, T2, Message> type;
+    };
+
+    template<class Message>
+    static typename args<Message>::type crack(Message m) {
+        typedef typename args<Message>::type args_type;
+        args_type result;
+        set_lResult(m, rxmsg_crack(tag(), m, [&](HWND, T1 t1, T2 t2) -> detail::extract_lresult {
+            result = args_type(t1, t2, m); return detail::extract_lresult();}));
+        return result;
+    }
+};
+template<class Tag, unsigned int Id, class T1, class T2, class T3>
+struct message_trait_builder<Tag, Id, T1, T2, T3, no_type> {
+    typedef Tag tag;
+    static const unsigned int id = Id;
+
+    template<class Message>
+    struct args {
+        typedef std::tuple<T1, T2, T3, Message> type;
+    };
+
+    template<class Message>
+    static typename args<Message>::type crack(Message m) {
+        typedef typename args<Message>::type args_type;
+        args_type result;
+        set_lResult(m, rxmsg_crack(tag(), m, [&](HWND, T1 t1, T2 t2, T3 t3) -> detail::extract_lresult {
+            result = args_type(t1, t2, t3, m); return detail::extract_lresult();}));
+        return result;
+    }
+};
+template<class Tag, unsigned int Id, class T1, class T2, class T3, class T4>
+struct message_trait_builder<Tag, Id, T1, T2, T3, T4> {
+    typedef Tag tag;
+    static const unsigned int id = Id;
+
+    template<class Message>
+    struct args {
+        typedef std::tuple<T1, T2, T3, T4, Message> type;
+    };
+
+    template<class Message>
+    static typename args<Message>::type crack(Message m) {
+        typedef typename args<Message>::type args_type;
+        args_type result;
+        set_lResult(m, rxmsg_crack(tag(), m, [&](HWND, T1 t1, T2 t2, T3 t3, T4 t4) -> detail::extract_lresult {
+            result = args_type(t1, t2, t3, t4, m); return detail::extract_lresult();}));
+        return result;
+    }
+};
+#endif
 
 template<class Tag>
 struct message_traits {
