@@ -47,6 +47,7 @@ endif()
 include_directories (${MODERNSCRATCH_SOURCE_DIR}/ext/Rx/Ix/CPP/src) 
 include_directories (${MODERNSCRATCH_SOURCE_DIR}/ext/Rx/Rx/CPP/src) 
 include_directories (${MODERNSCRATCH_SOURCE_DIR}/ext/kirkshoop/libraries) 
+include_directories (${MODERNSCRATCH_SOURCE_DIR}/ext/cpp-netlib) 
 include_directories (${MODERNSCRATCH_SOURCE_DIR}/rxwin32) 
 include_directories (${MODERNSCRATCH_SOURCE_DIR}/rxanimate) 
 

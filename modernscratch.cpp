@@ -45,6 +45,11 @@ namespace wh = web::http;
 namespace whc = web::http::client;
 #endif
 
+#if 1
+#include "boost/network/protocol/http/client.hpp"
+namespace bh=boost::network::http;
+#endif
+
 #include "cpprx/rx.hpp"
 
 #define UNIQUE_WINERROR_DEFINE_REPORTS
@@ -118,6 +123,62 @@ std::shared_ptr<rx::Observable<wh::http_response>> HttpRequest(const std::shared
 struct http_request {};
 auto rxcpp_chain(http_request&&, 
     const std::shared_ptr<rx::Observable<wh::http_request>>& source) 
+    -> decltype(HttpRequest(source)) {
+    return      HttpRequest(source);
+}
+#endif
+
+#if 1
+std::shared_ptr<rx::Observable<bh::client::response>> HttpRequest(const std::shared_ptr<rx::Observable<bh::client::request>>& source) {
+    return rx::CreateObservable<bh::client::response>(
+        [=](std::shared_ptr<rx::Observer<bh::client::response>> observer) 
+            -> rx::Disposable {
+            struct State {
+                State() : requestsPending(0), done(false), error(false) {
+                }
+                std::mutex lock;
+                bh::client client;
+                size_t requestsPending;
+                bool done;
+                bool error;
+            };
+            auto state = std::make_shared<State>();
+            return rx::from(source)
+                .subscribe(
+                //on next
+                    [=](const bh::client::request& rq){
+                        try{
+                            {std::unique_lock<std::mutex> guard(state->lock); ++state->requestsPending;}
+                            bh::client::response rs = state->client.get(rq);
+                            observer->OnNext(std::move(rs));
+                            bool done = false;
+                            {std::unique_lock<std::mutex> guard(state->lock); done = (0 == --state->requestsPending) && !state->error && state->done;}
+                            if (done) {
+                                observer->OnCompleted();
+                            }
+                        } catch (...) {
+                            observer->OnError(std::current_exception());
+                        }
+                    },
+                // on completed
+                    [=](){
+                        bool done = false;
+                        {std::unique_lock<std::mutex> guard(state->lock); state->done = true; done = !state->error && 0 == state->requestsPending;}
+                        if (done) {
+                            observer->OnCompleted();
+                        }
+                    },
+                // on error
+                    [=](const std::exception_ptr& error){
+                        {std::unique_lock<std::mutex> guard(state->lock); state->error = true;}
+                        observer->OnError(error);
+                    });
+        });
+}
+
+struct http_request {};
+auto rxcpp_chain(http_request&&, 
+    const std::shared_ptr<rx::Observable<bh::client::request>>& source) 
     -> decltype(HttpRequest(source)) {
     return      HttpRequest(source);
 }
@@ -347,6 +408,76 @@ namespace RootWindow
                         exceptions->push(std::make_pair("error in http request: ", e));});
 #endif
 
+#if 1
+
+            // layout tiles
+            rx::from(editMessages)
+                .chain<top_measure::select_parent_measurement>()
+                .select([](top_measure::Measurement m){
+                    return std::make_tuple(m.left.c, m.bottom.c);})
+                .combine_latest([](std::tuple<int, int> leftTop, top_measure::Measurement root){
+                    return std::tuple_cat(leftTop, std::make_tuple(root));}, rootMeasurement)
+                .combine_latest([](std::tuple<int, int, top_measure::Measurement> root, size_t ){
+                    return root;}, tilesChanged)
+                .observe_on(mainFormScheduler)
+                .subscribe(rx::MakeTupleDispatch([this](int left, int top, top_measure::Measurement root){
+                    if(cdTiles) {
+                        cdTiles->Dispose();}
+                    cdTiles = std::make_shared<rx::ComposableDisposable>();
+                    int nextTop = top;
+                    int nextLeft = left;
+                    int maxWidth = 0;
+
+                    for(auto& tile : tiles) {
+                        auto textMeasurement = tile->title.textmeasure.measureText();
+                        SetWindowPos(tile->title.window.get(), nullptr, nextLeft, nextTop, textMeasurement.width().c, textMeasurement.height().c, SWP_NOOWNERZORDER);
+                        InvalidateRect(tile->title.window.get(), nullptr, true);
+                        UpdateWindow(this->root);
+                        maxWidth = std::max(maxWidth, textMeasurement.width().c);
+                        if (nextTop + textMeasurement.height().c > root.height().c){
+                            nextTop = top;
+                            nextLeft += maxWidth;
+                            maxWidth = 0;
+                        } else {
+                            nextTop += textMeasurement.height().c;
+                        }
+
+                        if (nextLeft > root.width().c) {
+                            break;
+                        }
+                    }
+                }));
+
+            requests.push_back(bh::client::request("http://news.google.com/news?pz=1&cf=all&ned=us&hl=en&output=rss"));
+            requests.push_back(bh::client::request("http://news.google.com/news?pz=1&cf=all&ned=us&hl=en&output=atom"));
+            auto requestSource = std::make_shared<rx::EventLoopScheduler>();
+            rx::from(rx::Interval(std::chrono::seconds(5), requestSource))
+                .select_many([=, this](size_t ){
+                    return rx::from(Iterate(requests, worker))
+                        .chain<http_request>();
+                },
+                [this](size_t, bh::client::response rs) -> std::wstring {
+                    std::wstring text;
+                    auto rsbody = rs.body();
+                    // bad char to wchar_t conversion
+                    std::copy(rsbody.begin(), rsbody.end(), std::back_inserter<std::wstring>(text));
+                    return text;
+                })
+                .observe_on(mainFormScheduler)
+                .subscribe(
+                // on next
+                    [=](std::wstring text){
+                        // make sure to allocate tiles on the mainform scheduler
+                        tiles.push_back(std::make_shared<tile>(std::move(text), POINT(), root, instance));
+                        tilesChanged->OnNext(1);},
+                // on completed
+                    [](){
+                        },
+                //on error
+                    [this](const std::exception_ptr& e){
+                        exceptions->push(std::make_pair("error in http request: ", e));
+                    });
+#endif
             auto commands = rx::from(messages)
                 .where(rxmsg::messageId<rxmsg::wm::command>())
                 .select([](const rxmsg::message& msg){
@@ -452,14 +583,14 @@ namespace RootWindow
             rx::from(text)
                 .subscribe(
                 // on next
-                    [=](const std::wstring& msg){
+                    [=, this](const std::wstring& msg){
                         // set up labels and query
 
                         if (cd) {
                             cd->Dispose();
                         }
                         cd = std::make_shared<rx::ComposableDisposable>();
-                        past_labels.push_back(labels);
+                        //past_labels.push_back(labels);
                         labels = std::make_shared<std::list<label>>();
 #if 1
                         std::wstringstream logmsg;
@@ -515,10 +646,10 @@ namespace RootWindow
                                 .subscribe(
                                 // on next
                                     rx::MakeTupleDispatch(
-                                    [&charlabel, labelMeasurement, relativeX](int x, int y) {
+                                    [&charlabel, labelMeasurement, relativeX, this](int x, int y) {
                                         SetWindowPos(charlabel.window.get(), nullptr, x + relativeX, std::max(30, y), labelMeasurement.width().c, labelMeasurement.height().c, SWP_NOOWNERZORDER);
                                         InvalidateRect(charlabel.window.get(), nullptr, true);
-                                        UpdateWindow(charlabel.window.get());
+                                        UpdateWindow(this->root);
                                     }),
                                 // on completed
                                     [keepAlive](){ // using the capture to keep labels alive until the stream completes
@@ -578,8 +709,8 @@ namespace RootWindow
         std::vector<tile::shared> tiles;
         std::shared_ptr<rx::BehaviorSubject<size_t>> tilesChanged;
         std::shared_ptr<rx::ComposableDisposable> cdTiles;
-#if 0
-        std::vector<wh::http_request> requests;
+#if 1
+        std::vector<bh::client::request> requests;
 #endif
     };
 }
